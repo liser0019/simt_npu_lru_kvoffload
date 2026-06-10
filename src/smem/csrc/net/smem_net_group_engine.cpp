@@ -1043,7 +1043,6 @@ int32_t SmemNetGroupEngine::JoinLeaveEventProcess()
         }
         case RECOVER_EVENT: {
             // todo: 处理server故障场景
-            break;
         }
         case LINK_DOWN_EVENT: {
             if (groupInfo_.targetRank != option_.rank && option_.linkDownCb != nullptr) {

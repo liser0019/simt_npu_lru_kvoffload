@@ -172,6 +172,7 @@ private:
 
     StorePtr store_;
     SmemGroupEnginePtr globalGroup_ = nullptr;
+    bool joined_{false};
 
     // peer down callback
     smem_trans_peer_down_callback_t peerDownCallback_ = nullptr;

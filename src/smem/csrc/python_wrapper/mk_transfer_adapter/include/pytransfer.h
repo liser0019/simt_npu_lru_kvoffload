@@ -146,7 +146,6 @@ private:
         uintptr_t addr;
         size_t capacity;
     };
-    std::mutex registeredMemsMutex_;
     std::vector<RegMem> registeredMems_;
 
     // link down async cleanup

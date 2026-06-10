@@ -41,7 +41,8 @@ TransferAdapterPy::TransferAdapterPy() {}
 
 TransferAdapterPy::~TransferAdapterPy()
 {
-    TransferDestroy();
+    // ensure consumer thread is stopped before destruction
+    StopLinkDownConsumer();
     if (sockfd_ != -1) {
         close(sockfd_);
     }
@@ -55,7 +56,7 @@ int TransferAdapterPy::Initialize(const char *storeUrl, const char *uniqueId, co
         return -1;
     }
 
-    // set log level from env (SMEM OutLogger)
+     // set log level from env (SMEM OutLogger)
     const char *shmem_level = std::getenv("SHMEM_LOG_LEVEL");
     const char *mf_level = std::getenv("ASCEND_MF_LOG_LEVEL");
     if (shmem_level == nullptr && mf_level != nullptr && strlen(mf_level) == 1) {
@@ -76,7 +77,7 @@ int TransferAdapterPy::Initialize(const char *storeUrl, const char *uniqueId, co
     config_.deviceId = deviceId;
     config_.dataOpType = static_cast<smem_bm_data_op_type>(dataOpType);
     sessionId_ = uniqueId;
-
+    
     bool isStoreServer = (strcmp(storeServerRole, role) == 0);
     auto urlList = ParseMultiStoreUrl(std::string(storeUrl));
     configStoreProtocol_ = GetConfigStoreProtocol(urlList);
@@ -391,15 +392,12 @@ int TransferAdapterPy::BatchTransferWriteWithQuant(const char *destUniqueId,
 int TransferAdapterPy::RegisterMemory(uintptr_t buffer_addr, size_t capacity)
 {
     if (handle_ == nullptr) {
-        {
-            std::lock_guard<std::mutex> regLock(registeredMemsMutex_);
-            for (const auto &m : registeredMems_) {
-                if (m.addr == buffer_addr && m.capacity == capacity) return 0;
-            }
-            registeredMems_.push_back({buffer_addr, capacity});
-            ADAPTER_LOG_INFO("P registered memory addr=0x" << std::hex << buffer_addr
-                << std::dec << " size=" << capacity << " (total: " << registeredMems_.size() << ")");
+        for (const auto &m : registeredMems_) {
+            if (m.addr == buffer_addr && m.capacity == capacity) return 0;
         }
+        registeredMems_.push_back({buffer_addr, capacity});
+        ADAPTER_LOG_INFO("P registered memory addr=0x" << std::hex << buffer_addr
+            << std::dec << " size=" << capacity << " (total: " << registeredMems_.size() << ")");
 
         std::lock_guard<std::mutex> lock(connMutex_);
         for (auto &entry : connections_) {
@@ -420,30 +418,6 @@ int TransferAdapterPy::RegisterMemory(uintptr_t buffer_addr, size_t capacity)
 
 int TransferAdapterPy::UnregisterMemory(uintptr_t buffer_addr)
 {
-    if (handle_ == nullptr) {
-        {
-            std::lock_guard<std::mutex> regLock(registeredMemsMutex_);
-            for (auto it = registeredMems_.begin(); it != registeredMems_.end();) {
-                if (it->addr == buffer_addr) {
-                    it = registeredMems_.erase(it);
-                } else {
-                    ++it;
-                }
-            }
-        }
-
-        char *buffer = reinterpret_cast<char *>(buffer_addr);
-        std::lock_guard<std::mutex> lock(connMutex_);
-        for (auto &entry : connections_) {
-            if (!entry.second.active || entry.second.handle == nullptr) continue;
-            int ret = smem_trans_deregister_mem(entry.second.handle, buffer);
-            if (ret != 0) {
-                ADAPTER_LOG_ERROR("broadcast deregister_mem to " << entry.first << " failed, ret=" << ret);
-            }
-        }
-        return 0;
-    }
-
     ADAPTER_ASSERT_RETURN(handle_ != nullptr, "handle_ is null", -1);
     char *buffer = reinterpret_cast<char *>(buffer_addr);
     return smem_trans_deregister_mem(handle_, buffer);
@@ -468,20 +442,17 @@ int TransferAdapterPy::BatchRegisterMemory(std::vector<uintptr_t> buffer_addrs, 
     }
 
     if (handle_ == nullptr) {
-        {
-            std::lock_guard<std::mutex> regLock(registeredMemsMutex_);
-            for (size_t i = 0; i < count; ++i) {
-                bool dup = false;
-                for (const auto &m : registeredMems_) {
-                    if (m.addr == buffer_addrs[i] && m.capacity == capacities[i]) {
-                        dup = true;
-                        break;
-                    }
+        for (size_t i = 0; i < count; ++i) {
+            bool dup = false;
+            for (const auto &m : registeredMems_) {
+                if (m.addr == buffer_addrs[i] && m.capacity == capacities[i]) {
+                    dup = true;
+                    break;
                 }
-                if (!dup) registeredMems_.push_back({buffer_addrs[i], capacities[i]});
             }
-            ADAPTER_LOG_INFO("P batch registered " << count << " memories (total: " << registeredMems_.size() << ")");
+            if (!dup) registeredMems_.push_back({buffer_addrs[i], capacities[i]});
         }
+        ADAPTER_LOG_INFO("P batch registered " << count << " memories (total: " << registeredMems_.size() << ")");
 
         std::lock_guard<std::mutex> lock(connMutex_);
         for (auto &entry : connections_) {
@@ -542,10 +513,7 @@ void TransferAdapterPy::TransferDestroy()
             }
         }
         connections_.clear();
-        {
-            std::lock_guard<std::mutex> regLock(registeredMemsMutex_);
-            registeredMems_.clear();
-        }
+        registeredMems_.clear();
     } else if (handle_ != nullptr) {
         // receiver or legacy single-store: destroy direct handle
         smem_trans_destroy(handle_, 0);
@@ -647,25 +615,16 @@ smem_trans_t TransferAdapterPy::GetOrCreateConnection(const std::string &session
 
 void TransferAdapterPy::ReplayRegisteredMemories(smem_trans_t handle)
 {
-    if (handle == nullptr) {
+    if (registeredMems_.empty() || handle == nullptr) {
         return;
     }
 
-    std::vector<RegMem> mems;
-    {
-        std::lock_guard<std::mutex> lock(registeredMemsMutex_);
-        mems = registeredMems_;
-    }
-    if (mems.empty()) {
-        return;
-    }
-
-    const size_t count = mems.size();
+    const size_t count = registeredMems_.size();
     std::vector<void *> addrs(count);
     std::vector<size_t> caps(count);
     for (size_t i = 0; i < count; ++i) {
-        addrs[i] = reinterpret_cast<void *>(mems[i].addr);
-        caps[i] = mems[i].capacity;
+        addrs[i] = reinterpret_cast<void *>(registeredMems_[i].addr);
+        caps[i] = registeredMems_[i].capacity;
     }
 
     ADAPTER_LOG_INFO("replaying " << count << " registered memories on new connection");
