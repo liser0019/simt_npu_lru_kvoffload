@@ -272,6 +272,19 @@ TEST_F(SmemNetGroupEngineMockTest, GroupSnClean)
     group->GroupSnClean();
 }
 
+// === Tests for commit dc686c2 new functionality ===
+
+TEST_F(SmemNetGroupEngineMockTest, GetStoreConnectStatusReturnsStoreStatus)
+{
+    mockStoreManager_->getResult_ = ock::smem::SM_OK;
+
+    auto group = ock::smem::SmemNetGroupEngine::Create(storePtr_, option_);
+    ASSERT_NE(group, nullptr);
+
+    // GetStoreConnectStatus delegates to store_->GetConnectStatus().
+    EXPECT_TRUE(group->GetStoreConnectStatus());
+}
+
 TEST_F(SmemNetGroupEngineMockTest, ReconnectHandlerSkipsAfterGroupDestroyed)
 {
     option_.dynamic = true;
@@ -286,3 +299,4 @@ TEST_F(SmemNetGroupEngineMockTest, ReconnectHandlerSkipsAfterGroupDestroyed)
     EXPECT_EQ(mockStoreManager_->reconnectHandler(), ock::smem::SM_OK);
     EXPECT_EQ(mockStoreManager_->casCount, 0);
 }
+>>>>>>> 226431cb (解决流水线 trans 场景core问题)
