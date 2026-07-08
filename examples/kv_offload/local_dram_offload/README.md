@@ -9,13 +9,13 @@
 ## 使用能力
 - `mf.set_log_level(level)`
 - `offload.initialize(config: OffloadConfig)` / `offload.uninitialize()`
-- `OffloadConfig`（`device_id`、`size`）
+- `OffloadConfig`（`device_id`、`reserve_size`、`alloc_size`）
 - `offload.empty(sizes, dtype, pin_memory)`（在 host DRAM 池分配 KV tensor）
 - `offload.sparse_copy(srcPtrs, dstPtrs, lenPtrs, sizePtr, deviceId)`（批量稀疏 H2D 拷贝）
 
 ## 规模建议
 - world_size=4（4 进程 4 卡，spawn 启动）
-- 每 rank offload 池 size=1GB
+- 每 rank offload 池 reserve_size=alloc_size=1GB
 - KV 维度：K_DIM=512、V_DIM=64，dtype=bfloat16
 - 每 rank tokens=4×2048=8192 组 KV
 

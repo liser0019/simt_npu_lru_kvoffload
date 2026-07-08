@@ -12,6 +12,7 @@
 
 import multiprocessing as mp
 import torch
+import torch.distributed as dist
 import torch_npu
 import memfabric_hybrid as mf
 from memfabric_hybrid import offload
@@ -34,8 +35,11 @@ def _rank_main(rank_id: int, device_id: int, sync: mp.Barrier):
     config = offload.OffloadConfig()
     config.device_id = device_id
     config.reserve_size = ONE_GIB
-    config.alloc_size = ONE_GIB
-    assert offload.initialize(config) == 0, "offload.initialize failed"
+    config.alloc_size = ONE_GIB if rank_id == 0 else 0
+    config.world_size = WORLD_SIZE
+    config.rank_id = rank_id
+    config.scene = offload.Scene.SHARED
+    assert offload.initialize(config) == 0, f"rank_id:{rank_id} offload.initialize failed"
 
     data = {
         'cpu': {'keys': [], 'values': [], 'key_ptrs': [], 'value_ptrs': []},
@@ -45,8 +49,12 @@ def _rank_main(rank_id: int, device_id: int, sync: mp.Barrier):
 
     tokens = 4 * 2048  # batch * tokens_per_req
     for _ in range(tokens):
-        cpu_key = offload.empty([K_DIM, 1], dtype=torch.bfloat16).zero_()
-        cpu_value = offload.empty([V_DIM, 1], dtype=torch.bfloat16).zero_()
+        if rank_id == 0:
+            cpu_key = offload.empty([K_DIM, 1], dtype=torch.bfloat16).zero_()
+            cpu_value = offload.empty([V_DIM, 1], dtype=torch.bfloat16).zero_()
+        else:
+            cpu_key = torch.ones([K_DIM, 1], dtype=torch.bfloat16)
+            cpu_value = torch.ones([V_DIM, 1], dtype=torch.bfloat16)
         npu_key = torch.ones(K_DIM, dtype=torch.bfloat16).npu()
         npu_value = torch.ones(V_DIM, dtype=torch.bfloat16).npu()
 
@@ -69,6 +77,9 @@ def _rank_main(rank_id: int, device_id: int, sync: mp.Barrier):
     len_ptrs = torch.tensor(data['len']['keys'] + data['len']['values'], dtype=torch.int32).npu()
     size_ptr = torch.tensor(size, dtype=torch.int32).npu()
     device = data['npu']['keys'][0].device
+
+    group = dist.init_process_group("hccl", init_method='tcp://127.0.0.1:23456', rank=rank_id, world_size=WORLD_SIZE)
+    dist.broadcast(src_ptrs, src=0)
 
     assert offload.sparse_copy(src_ptrs, dst_ptrs, len_ptrs, size_ptr, device) == 0, "offload.sparse_copy failed"
     torch.npu.synchronize()
@@ -102,7 +113,7 @@ def main():
 
     if p0.exitcode != 0 or p1.exitcode != 0 or p2.exitcode != 0 or p3.exitcode != 0:
         raise RuntimeError(f"child rank failed: p0={p0.exitcode}, p1={p1.exitcode}, p2={p2.exitcode}, p3={p3.exitcode}")
-    print("local_dram_offload: all ranks OK", flush=True)
+    print("shared_dram_offload: all ranks OK", flush=True)
 
 
 if __name__ == "__main__":

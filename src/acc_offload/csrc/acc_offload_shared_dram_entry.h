@@ -8,13 +8,13 @@
  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
-*/
-#ifndef MEMFABRIC_HYBRID_ACC_LOCAL_DRAM_OFFLOAD_ENTRY_H
-#define MEMFABRIC_HYBRID_ACC_LOCAL_DRAM_OFFLOAD_ENTRY_H
+ */
+#ifndef MEMFABRIC_HYBRID_ACC_SHARED_DRAM_OFFLOAD_ENTRY_H
+#define MEMFABRIC_HYBRID_ACC_SHARED_DRAM_OFFLOAD_ENTRY_H
 
 #include <mutex>
 #include <memory>
-#include "hybm_def.h"
+#include "smem_bm_def.h"
 #include "acc_offload.h"
 #include "acc_offload_entry.h"
 #include "acc_offload_mem_manager.h"
@@ -22,16 +22,16 @@
 namespace ock {
 namespace offload {
 
-class AccOffloadLocalDramEntry : public AccOffloadEntry {
+class AccOffloadSharedDramEntry : public AccOffloadEntry {
 public:
-    AccOffloadLocalDramEntry() = default;
-    ~AccOffloadLocalDramEntry() override
+    AccOffloadSharedDramEntry() = default;
+    ~AccOffloadSharedDramEntry() override
     {
         UnInitalize();
     };
 
-    AccOffloadLocalDramEntry(const AccOffloadLocalDramEntry &) = delete;
-    AccOffloadLocalDramEntry &operator=(const AccOffloadLocalDramEntry &) = delete;
+    AccOffloadSharedDramEntry(const AccOffloadSharedDramEntry &) = delete;
+    AccOffloadSharedDramEntry &operator=(const AccOffloadSharedDramEntry &) = delete;
 
     int32_t Initialize(const offload_config_t &config) override;
 
@@ -48,8 +48,7 @@ public:
 private:
     std::mutex mutex_;
     bool inited_ = false;
-    hybm_entity_t entity_ = nullptr;
-    hybm_mem_slice_t slice_ = nullptr;
+    smem_bm_t bmHandle_ = nullptr;
     uint8_t *base_ = nullptr;
     uint64_t size_ = 0;
     std::shared_ptr<AccOffloadMemManager> memMng_;
@@ -58,4 +57,4 @@ private:
 } // namespace offload
 } // namespace ock
 
-#endif // MEMFABRIC_HYBRID_ACC_LOCAL_DRAM_OFFLOAD_ENTRY_H
+#endif // MEMFABRIC_HYBRID_ACC_SHARED_DRAM_OFFLOAD_ENTRY_H

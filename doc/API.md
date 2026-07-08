@@ -802,19 +802,41 @@ int32_t smem_trans_write_submit(smem_trans_t handle, const void *localAddr, cons
 ## ACC OFFLOAD接口列表
 
 ### 1. 常用类型
+#### offload_scene_t
+offload内存池场景枚举
+```c
+typedef enum {
+    OFFLOAD_SCENE_LOCAL = 0,    /* single-rank local DRAM memory pool */
+    OFFLOAD_SCENE_SHARED = 1,   /* multi-rank shared DRAM memory pool */
+} offload_scene_t;
+```
+
+|枚举值|含义|
+|-|-|
+|OFFLOAD_SCENE_LOCAL|单卡本地DRAM内存池，每rank独占一份池|
+|OFFLOAD_SCENE_SHARED|多卡共享DRAM内存池，reserveSize需保证相同，allocSize支持按需传入|
+
 #### offload_config_t
 offload初始化配置结构体
 ```c
 typedef struct {
     uint32_t deviceId;
-    uint64_t size;
+    uint64_t reserveSize;
+    uint64_t allocSize;
+    uint32_t worldSize;
+    uint32_t rankId;
+    offload_scene_t scene;
 } offload_config_t;
 ```
 
 |成员|含义|
 |-|-|
 |deviceId|绑定的device id|
-|size|DRAM内存大小，单位字节，内部会向上对齐到GB|
+|reserveSize|预留DRAM内存池大小，单位字节，内部会向上对齐到GB|
+|allocSize|本地实际分配物理DRAM大小，单位字节，内部会向上对齐到GB。LOCAL场景需与reserveSize相等；SHARED场景支持按需传入|
+|worldSize|参与组网的rank数量（SHARED场景使用）|
+|rankId|本地rank id（SHARED场景使用）|
+|scene|内存池场景，取值参考offload_scene_t，默认OFFLOAD_SCENE_LOCAL|
 
 ### 2. 初始化/退出
 #### offload_init

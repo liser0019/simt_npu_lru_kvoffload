@@ -128,7 +128,8 @@ SMEM_API uint32_t smem_bm_get_rank_id()
 static inline int32_t SmemBmDataOpCheck(smem_bm_data_op_type dataOpType)
 {
     constexpr uint32_t dataOpTypeMask = SMEMB_DATA_OP_SDMA | SMEMB_DATA_OP_HOST_RDMA | SMEMB_DATA_OP_HOST_URMA |
-                                        SMEMB_DATA_OP_HOST_TCP | SMEMB_DATA_OP_DEVICE_RDMA | SMEMB_DATA_OP_HOST_SHM;
+                                        SMEMB_DATA_OP_HOST_TCP | SMEMB_DATA_OP_DEVICE_RDMA | SMEMB_DATA_OP_HOST_SHM |
+                                        SMEMB_DATA_OP_MTE;
     return (dataOpType & dataOpTypeMask) != 0;
 }
 
@@ -187,7 +188,7 @@ SMEM_API smem_bm_t smem_bm_create2(uint32_t id, const smem_bm_create_option_t *o
         return nullptr;
     }
     constexpr uint32_t hostShmConflictMask = SMEMB_DATA_OP_SDMA | SMEMB_DATA_OP_HOST_RDMA | SMEMB_DATA_OP_HOST_URMA |
-                                             SMEMB_DATA_OP_HOST_TCP | SMEMB_DATA_OP_DEVICE_RDMA;
+                                             SMEMB_DATA_OP_HOST_TCP | SMEMB_DATA_OP_DEVICE_RDMA | SMEMB_DATA_OP_MTE;
     if (isHostShm && (option->dataOpType & hostShmConflictMask) != 0) {
         SM_LOG_AND_SET_LAST_ERROR("HOST_SHM op type does not support mixing with other data op types");
         return nullptr;

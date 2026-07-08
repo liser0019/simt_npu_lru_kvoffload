@@ -61,6 +61,10 @@ public:
             resultOpType |= HYBM_DOP_TYPE_HOST_SHM;
         }
 
+        if (smemBmDataOpType & SMEMB_DATA_OP_MTE) {
+            resultOpType |= HYBM_DOP_TYPE_MTE;
+        }
+
         return static_cast<hybm_data_op_type>(resultOpType);
     }
 };

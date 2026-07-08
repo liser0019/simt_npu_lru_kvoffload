@@ -36,7 +36,7 @@ target_compile_options(acc_offload_objects PRIVATE -fPIC)
 
 add_library(acc_offload_static STATIC $<TARGET_OBJECTS:acc_offload_objects> $<TARGET_OBJECTS:config_store_object>)
 set_target_properties(acc_offload_static PROPERTIES OUTPUT_NAME "mf_acc_offload")
-target_link_libraries(acc_offload_static PUBLIC pthread acc_tcp_net_static hybmm_static)
+target_link_libraries(acc_offload_static PUBLIC pthread acc_tcp_net_static hybmm_static smem_static)
 
 add_library(acc_offload_shared SHARED $<TARGET_OBJECTS:acc_offload_objects> $<TARGET_OBJECTS:config_store_object>)
 set_target_properties(acc_offload_shared PROPERTIES
@@ -45,7 +45,7 @@ set_target_properties(acc_offload_shared PROPERTIES
     INSTALL_RPATH "\$ORIGIN"
     INSTALL_RPATH_USE_LINK_PATH TRUE
 )
-target_link_libraries(acc_offload_shared PUBLIC pthread acc_tcp_net_static hybmm_shared)
+target_link_libraries(acc_offload_shared PUBLIC pthread acc_tcp_net_static hybmm_shared smem_shared)
 
 if ((BUILD_PYTHON STREQUAL "ON") AND (NOT BUILD_UT STREQUAL "ON"))
     add_subdirectory(python_wrapper)

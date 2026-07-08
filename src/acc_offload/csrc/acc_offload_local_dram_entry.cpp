@@ -27,12 +27,6 @@ static uint64_t AlignUp(uint64_t value, uint64_t align) noexcept
     return (value + align - 1) & ~(align - 1);
 }
 
-AccOffloadLocalDramEntry &AccOffloadLocalDramEntry::Instance()
-{
-    static AccOffloadLocalDramEntry instance;
-    return instance;
-}
-
 int32_t AccOffloadLocalDramEntry::Initialize(const offload_config_t &config)
 {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -49,16 +43,22 @@ int32_t AccOffloadLocalDramEntry::Initialize(const offload_config_t &config)
         return OFFLOAD_ERROR;
     }
 
-    uint64_t alignedSize = AlignUp(config.size, GB);
+    uint64_t alignedReserveSize = AlignUp(config.reserveSize, GB);
+    uint64_t alignedAllocSize = AlignUp(config.allocSize, GB);
+    if (alignedReserveSize != alignedAllocSize) {
+        OFFLOAD_LOG_ERROR("local dram requires reserveSize == allocSize, reserveSize: " << config.reserveSize
+                          << ", allocSize: " << config.allocSize);
+        return OFFLOAD_ERROR;
+    }
     hybm_options options{};
     options.bmType = HYBM_TYPE_HOST_INITIATE;
     options.memType = HYBM_MEM_TYPE_HOST;
-    options.bmDataOpType = HYBM_DOP_TYPE_SDMA;
+    options.bmDataOpType = HYBM_DOP_TYPE_MTE;
     options.rankCount = 1;
     options.rankId = 0;
     options.devId = config.deviceId;
-    options.maxDRAMSize = alignedSize;
-    options.hostVASpace = alignedSize;
+    options.maxDRAMSize = alignedReserveSize;
+    options.hostVASpace = alignedAllocSize;
     options.scene = HYBM_SCENE_DEFAULT;
     options.flags = HYBM_FLAG_DRAM_MAP_HOST_VA;
     options.dramShmFd = -1;
@@ -102,7 +102,7 @@ int32_t AccOffloadLocalDramEntry::Initialize(const offload_config_t &config)
         }
     } while (0);
 
-    size_ = alignedSize;
+    size_ = alignedReserveSize;
     memMng_ = std::make_shared<AccOffloadMemManager>(base_, size_);
     inited_ = true;
 

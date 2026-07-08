@@ -57,6 +57,7 @@ cc_library(
         "//src:util_headers",
         "//src:acc_links_headers",
         "//src:hybm_headers",
+        "//src:smem_headers",
     ],
     alwayslink = True,
 )
@@ -85,6 +86,7 @@ cc_library(
         "//src/smem/csrc/config_store:config_store_object",
         ":acc_offload_objects",
         "//src/hybm/csrc:hybmm_shared",
+        "//src/smem/csrc:smem_shared",
     ],
     alwayslink = True,
 )
@@ -102,6 +104,7 @@ cc_library(
         "//src/smem/csrc/config_store:config_store_object",
         ":acc_offload_objects",
         "//src/hybm/csrc:hybmm_static",
+        "//src/smem/csrc:smem_static",
     ],
     alwayslink = True,
 )

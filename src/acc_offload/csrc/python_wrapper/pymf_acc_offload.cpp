@@ -22,10 +22,25 @@ namespace py = pybind11;
 
 void DefineAccOffloadConfig(py::module_ &m)
 {
+    py::enum_<offload_scene_t>(m, "Scene")
+        .value("LOCAL", OFFLOAD_SCENE_LOCAL)
+        .value("SHARED", OFFLOAD_SCENE_SHARED)
+        .export_values();
+
     py::class_<offload_config_t>(m, "OffloadConfig")
         .def(py::init<>())
         .def_readwrite("device_id", &offload_config_t::deviceId)
-        .def_readwrite("size", &offload_config_t::size);
+        .def_readwrite("reserve_size", &offload_config_t::reserveSize,
+                       "Reserved DRAM pool size in bytes, will be aligned up to GB")
+        .def_readwrite("alloc_size", &offload_config_t::allocSize,
+                       "Allocated local physical DRAM size in bytes, will be aligned up to GB. "
+                       "LOCAL: must equal reserve_size; SHARED: provides the actual size")
+        .def_readwrite("world_size", &offload_config_t::worldSize,
+                       "number of ranks in the group (multi-card shared mode)")
+        .def_readwrite("rank_id", &offload_config_t::rankId,
+                       "local rank id, 0 is the server (multi-card shared mode)")
+        .def_readwrite("scene", &offload_config_t::scene,
+                       "memory pool scene: LOCAL=single-card, SHARED=multi-card shared");
 }
 
 void DefineAccOffloadApi(py::module_ &m)

@@ -519,6 +519,19 @@ def sparse_copy(srcPtrs, dstPtrs, lenPtrs, sizePtr, deviceId) -> int
 |返回值|成功返回0，其他为错误码|
 
 ### 4. 常用类型
+#### Scene枚举类
+offload内存池场景枚举，通过 `offload.Scene` 访问
+```python
+class Scene(Enum):
+    LOCAL
+    SHARED
+```
+
+|属性|含义|
+|-|-|
+|LOCAL|单卡本地DRAM内存池，每rank独占一份池|
+|SHARED|多卡共享DRAM内存池|
+
 #### OffloadConfig类
 ```python
 class OffloadConfig:
@@ -529,4 +542,8 @@ class OffloadConfig:
 |-|-|
 |构造函数|offload配置初始化|
 |device_id属性|绑定的device id|
-|size属性|DRAM内存大小，单位字节，内部会向上对齐到GB|
+|reserve_size属性|预留DRAM内存池大小，单位字节，内部会向上对齐到GB|
+|alloc_size属性|本地实际分配物理DRAM大小，单位字节，内部会向上对齐到GB。LOCAL场景需与reserve_size相等；SHARED场景支持按需传入|
+|world_size属性|参与组网的rank数量（SHARED场景使用）|
+|rank_id属性|本地rank id（SHARED场景使用）|
+|scene属性|内存池场景，取值参考Scene枚举，默认LOCAL|

@@ -88,21 +88,26 @@ c接口使用方式:
 ```
 
 ### 4) Acc Offload
-面向KV Cache卸载等场景，提供基于单卡DRAM的内存池及卡侧稀疏拷贝加速能力
+面向KV Cache卸载等场景，提供DRAM内存池及卡侧稀疏拷贝加速能力，支持单卡本地（LOCAL）与多卡共享（SHARED）两种场景
 
     * 支持从预留的DRAM内存池中分配/释放host内存（参见offload_malloc和offload_free接口）
     * 提供卡侧批量稀疏拷贝接口，加速多个不连续地址间的数据搬移（参见offload_sparse_copy接口）
+    * LOCAL场景：每rank独占一份本地DRAM池
+    * SHARED场景：多rank共享同一份DRAM池
     * Python侧提供torch友好的empty和sparse_copy封装
     * 接口支持的语言: c, python
 
 ##### 使用简介
-详情参考[offload_example](../examples/kv_offload/local_dram_offload/local_dram_offload.py)
+LOCAL场景详情参考[local_dram_offload示例](../examples/kv_offload/local_dram_offload/local_dram_offload.py)，SHARED场景详情参考[shared_dram_offload示例](../examples/kv_offload/shared_dram_offload/shared_dram_offload.py)
 简单概述如下
 ```
 python接口使用方式:
 1. from memfabric_hybrid import offload
 2. 构造OffloadConfig，调用offload.initialize接口初始化
+   - LOCAL场景：设置device_id、reserve_size、alloc_size（两者需相等），scene保持默认LOCAL
+   - SHARED场景：设置device_id、reserve_size、alloc_size（传实际值）、world_size、rank_id，scene设为offload.Scene.SHARED
 3. 调用offload.empty分配内存并获得torch.Tensor，或调用offload.malloc获得地址
 4. 调用offload.sparse_copy接口在device上执行批量稀疏拷贝
 5. 调用offload.free释放内存，调用offload.uninitialize退出
+   - SHARED场景下initialize/uninitialize为集合操作，需所有rank同步进入与退出
 ```

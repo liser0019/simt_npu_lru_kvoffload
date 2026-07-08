@@ -70,6 +70,7 @@ cc_library (
     visibility = [
         "//src/smem/csrc/python_wrapper/mk_transfer_adapter:__pkg__",
         "//src/smem/csrc/python_wrapper/memfabric_hybrid:__pkg__",
+        "//src/acc_offload/csrc:__pkg__",
     ],
     srcs = [],
     linkstatic = False,
@@ -98,6 +99,9 @@ cc_library (
 
 cc_library (
     name = "smem_static",
+    visibility =  [
+        "//src/acc_offload/csrc:__pkg__",
+    ],
     srcs = [],
     linkstatic = True,
     local_defines = [] + COMMON_LOCAL_DEFINES,

@@ -12,15 +12,26 @@
 #ifndef __MEMFABRIC_ACC_OFFLOAD_H__
 #define __MEMFABRIC_ACC_OFFLOAD_H__
 
-#include <cstdint>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+typedef enum {
+    OFFLOAD_SCENE_LOCAL = 0,                   /* single-card local DRAM memory pool */
+    OFFLOAD_SCENE_SHARED = 1,                 /* multi-card shared DRAM memory pool */
+} offload_scene_t;
+
 typedef struct {
-    uint32_t deviceId;
-    uint64_t size;
+    uint32_t deviceId;                        /* Device ID to bind */
+    uint64_t reserveSize;                     /* Reserved DRAM pool size in bytes, will be aligned up to GB. */
+    uint64_t allocSize;                      /* Allocated local physical DRAM size in bytes, will be aligned
+                                                 up to GB. LOCAL: must equal reserveSize; SHARED: provides
+                                                 the actual size. */
+    uint32_t worldSize;                       /* number of ranks in the group (used in SHARED scene) */
+    uint32_t rankId;                          /* local rank id, 0 is the allocator (used in SHARED scene) */
+    offload_scene_t scene;                    /* LOCAL: single-card pool; SHARED: multi-card shared pool */
 } offload_config_t;
 
 /**
@@ -29,8 +40,7 @@ typedef struct {
  * This function initializes the hybm big memory entity and loads the
  * offload library for sparse copy operations.
  *
- * @param deviceId  [in] Device ID to bind.
- * @param size      [in] DRAM memory size in bytes, will be aligned up to GB.
+ * @param config  [in] Init config, see offload_config_t.
  * @return 0 on success, non-zero error code on failure.
  */
 int32_t offload_init(const offload_config_t &config);

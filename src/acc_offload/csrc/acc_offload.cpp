@@ -8,33 +8,27 @@
  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
-*/
+ */
 #include "acc_offload.h"
-#include "acc_offload_local_dram_entry.h"
+#include "acc_offload_entry_manager.h"
 #include "acc_offload_define.h"
 
 using namespace ock::offload;
 
 OFFLOAD_API int32_t offload_init(const offload_config_t &config)
 {
-    auto &entry = AccOffloadLocalDramEntry::Instance();
-    auto ret = entry.Initialize(config);
-    OFFLOAD_LOG_INFO("offload_init ret: " << ret  << ", deviceId: " << config.deviceId << ", size: " << config.size);
-    return ret;
+    return AccOffloadEntryManager::Instance().Initialize(config);
 }
 
 OFFLOAD_API void offload_uninit()
 {
-    auto &entry = AccOffloadLocalDramEntry::Instance();
-    entry.UnInitalize();
-    OFFLOAD_LOG_INFO("offload_uninit finished");
+    AccOffloadEntryManager::Instance().UnInitalize();
 }
 
 OFFLOAD_API uint64_t offload_malloc(uint64_t size, uint64_t flags)
 {
     (void)flags;
-    auto &entry = AccOffloadLocalDramEntry::Instance();
-    auto ptr = entry.MallocHost(size);
+    auto ptr = AccOffloadEntryManager::Instance().MallocHost(size);
     if (ptr == nullptr) {
         OFFLOAD_LOG_ERROR("offload_malloc failed, size:" << size);
         return 0;
@@ -46,19 +40,17 @@ OFFLOAD_API uint64_t offload_malloc(uint64_t size, uint64_t flags)
 OFFLOAD_API void offload_free(uint64_t ptr, uint64_t flags)
 {
     (void)flags;
-    auto &entry = AccOffloadLocalDramEntry::Instance();
-    entry.FreeHost(reinterpret_cast<void *>(ptr));
+    AccOffloadEntryManager::Instance().FreeHost(reinterpret_cast<void *>(ptr));
 }
 
 OFFLOAD_API int32_t offload_sparse_copy(uint64_t srcPtr, uint64_t dstPtr, uint64_t lenPtr, uint64_t sizePtr,
                                         uint16_t deviceId)
 {
-    auto &entry = AccOffloadLocalDramEntry::Instance();
-
     auto srcPtrs = reinterpret_cast<uint64_t *>(srcPtr);
     auto dstPtrs = reinterpret_cast<uint64_t *>(dstPtr);
     auto lenPtrs = reinterpret_cast<uint32_t *>(lenPtr);
     auto sizePtr_ = reinterpret_cast<uint32_t *>(sizePtr);
 
-    return entry.SparseCopy(srcPtrs, dstPtrs, lenPtrs, sizePtr_, deviceId);
+    return AccOffloadEntryManager::Instance().SparseCopy(srcPtrs, dstPtrs, lenPtrs, sizePtr_,
+                                                         static_cast<uint8_t>(deviceId));
 }
