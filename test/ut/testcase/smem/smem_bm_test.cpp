@@ -1074,7 +1074,7 @@ TEST_F(SmemBmTest, smem_bm_create2_total_exceed_32t_without_enable56bits_gva_fai
     option.dramShmFd = -1;
 
     (void)smem_get_and_clear_last_err_msg();
-    smem_bm_t handle = smem_bm_create2(50, &option);
+    smem_bm_t handle = smem_bm_create2(0, &option);
     EXPECT_EQ(handle, nullptr);
     const std::string lastError = smem_get_last_err_msg();
     EXPECT_NE(lastError.find("exceeds 32TB"), std::string::npos);
@@ -1088,7 +1088,7 @@ TEST_F(SmemBmTest, smem_bm_create_total_exceed_32t_failed)
     EnsureSmemBmInited(worldSize);
 
     (void)smem_get_and_clear_last_err_msg();
-    smem_bm_t handle = smem_bm_create(53, worldSize, SMEMB_DATA_OP_HOST_URMA, 2ULL << 40, 0, 0);
+    smem_bm_t handle = smem_bm_create(0, worldSize, SMEMB_DATA_OP_HOST_URMA, 2ULL << 40, 0, 0);
     EXPECT_EQ(handle, nullptr);
     const std::string lastError = smem_get_last_err_msg();
     EXPECT_NE(lastError.find("exceeds 32TB"), std::string::npos);
@@ -1111,7 +1111,7 @@ TEST_F(SmemBmTest, smem_bm_create2_total_exceed_32t_with_enable56bits_gva_succes
     option.flags = 0;
     option.dramShmFd = -1;
 
-    smem_bm_t handle = smem_bm_create2(51, &option);
+    smem_bm_t handle = smem_bm_create2(1, &option);
     EXPECT_NE(handle, nullptr);
     if (handle != nullptr) {
         smem_bm_destroy(handle);
@@ -1134,7 +1134,7 @@ TEST_F(SmemBmTest, smem_bm_create2_total_at_32t_boundary_without_enable56bits_gv
     option.flags = 0;
     option.dramShmFd = -1;
 
-    smem_bm_t handle = smem_bm_create2(52, &option);
+    smem_bm_t handle = smem_bm_create2(2, &option);
     EXPECT_NE(handle, nullptr);
     if (handle != nullptr) {
         smem_bm_destroy(handle);
@@ -1268,7 +1268,7 @@ TEST_F(SmemBmTest, smem_batch_copy_success)
 TEST_F(SmemBmTest, smem_bm_copy_batch_not_joined)
 {
     uint32_t rankId = 0;
-    smem_bm_t handle = MockInitAndCreateHandle(18);
+    smem_bm_t handle = MockInitAndCreateHandle(8);
 
     char *mock_host = static_cast<char *>(malloc(BATCH_SIZE * COPY_SIZE));
     EXPECT_NE(mock_host, nullptr);
@@ -1304,7 +1304,7 @@ TEST_F(SmemBmTest, smem_bm_copy_batch_not_joined)
 
 TEST_F(SmemBmTest, smem_bm_copy_batch_partial_succeed_not_joined)
 {
-    smem_bm_t handle = MockInitAndCreateHandle(19);
+    smem_bm_t handle = MockInitAndCreateHandle(9);
 
     constexpr uint32_t partialBatchSize = 2;
     constexpr uint64_t largeCopySize = 5UL * 1024UL * 1024UL;
@@ -1500,7 +1500,7 @@ TEST_F(SmemBmTest, smem_bm_copy_success)
 TEST_F(SmemBmTest, smem_bm_copy_not_joined)
 {
     uint32_t rankId = 0;
-    smem_bm_t handle = MockInitAndCreateHandle(17);
+    smem_bm_t handle = MockInitAndCreateHandle(7);
 
     void *local_dev_mock = malloc(COPY_SIZE);
     EXPECT_NE(local_dev_mock, nullptr);

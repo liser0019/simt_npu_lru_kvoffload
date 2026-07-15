@@ -142,6 +142,10 @@ inline void *SmemBmEntry::GetDeviceGvaAddress() const
     return deviceGva_;
 }
 
+int32_t SmemBmEntryInitWithOptions(const SmemBmEntryPtr &entry, const smem_bm_create_option_t *option,
+                                   uint32_t rankId, uint16_t deviceId, uint32_t worldSize,
+                                   const std::string &hcomUrl, const smem_tls_config &hcomTlsConfig);
+
 } // namespace smem
 } // namespace ock
 

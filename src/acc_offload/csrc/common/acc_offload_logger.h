@@ -20,4 +20,12 @@
 #define OFFLOAD_LOG_WARN(ARGS)  MF_OUT_LOG("[OFFLOAD ", ock::mf::WARN_LEVEL, ARGS)
 #define OFFLOAD_LOG_ERROR(ARGS) MF_OUT_LOG("[OFFLOAD ", ock::mf::ERROR_LEVEL, ARGS)
 
+#define OFFLOAD_ASSERT_RETURN(ARGS, RET)            \
+    do {                                            \
+        if (__builtin_expect(!(ARGS), 0) != 0) {    \
+            OFFLOAD_LOG_ERROR("Assert " << #ARGS);  \
+            return RET;                             \
+        }                                           \
+    } while (0)
+
 #endif // MEMFABRIC_HYBRID_ACC_OFFLOAD_LOGGER_H

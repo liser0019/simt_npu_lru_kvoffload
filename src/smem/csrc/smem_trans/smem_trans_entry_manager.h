@@ -17,7 +17,6 @@
 
 namespace ock {
 namespace smem {
-constexpr uint32_t TRANS_ENTITY_ID_BASE = 256U;
 
 class SmemTransEntryManager {
 public:
@@ -38,7 +37,7 @@ private:
     std::map<uintptr_t, SmemTransEntryPtr> ptr2EntryMap_;    /* lookup entry by ptr */
     std::map<std::string, SmemTransEntryPtr> name2EntryMap_; /* deduplicate entry by name */
     uint16_t deviceId_{0};
-    uint32_t entryIdx_{TRANS_ENTITY_ID_BASE};
+    uint32_t entryIdx_{0};
 };
 } // namespace smem
 } // namespace ock

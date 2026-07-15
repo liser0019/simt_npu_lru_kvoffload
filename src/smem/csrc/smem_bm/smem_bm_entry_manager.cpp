@@ -140,6 +140,9 @@ Result SmemBmEntryManager::CreateEntryById(uint32_t id, SmemBmEntryPtr &entry /*
     std::lock_guard<std::mutex> guard(entryMutex_);
     /* look up the bm entry exists or not with lock */
     SM_ASSERT_RETURN(inited_, SM_NOT_STARTED);
+    SM_VALIDATE_RETURN(id < HYBM_ENTITY_ID_SEGMENT_SIZE,
+                       "invalid id, id range is: [0, " << HYBM_ENTITY_ID_SEGMENT_SIZE << ")", SM_INVALID_PARAM);
+
     auto iter = entryIdMap_.find(id);
     if (iter != entryIdMap_.end()) {
         SM_LOG_WARN("create bm entry failed as already exists, id: " << id);

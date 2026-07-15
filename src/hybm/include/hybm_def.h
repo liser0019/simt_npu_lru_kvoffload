@@ -39,6 +39,12 @@ typedef void *hybm_mem_slice_t;
 
 #define HYBM_PRE_REG_SIZE_THRES (8192U * 1024) // local buffer larger than 8MB maybe preregister to mr
 
+#define HYBM_ENTITY_ID_SEGMENT_SIZE 16U
+#define HYBM_ENTITY_ID_SHM_BASE     0U
+#define HYBM_ENTITY_ID_BM_BASE      (HYBM_ENTITY_ID_SEGMENT_SIZE * 1U)
+#define HYBM_ENTITY_ID_TRANS_BASE   (HYBM_ENTITY_ID_SEGMENT_SIZE * 2U)
+#define HYBM_ENTITY_ID_OFFLOAD_BASE (HYBM_ENTITY_ID_SEGMENT_SIZE * 3U)
+
 /* error code define */
 #define BM_OK                               (0)
 #define BM_ERROR                            (-1)

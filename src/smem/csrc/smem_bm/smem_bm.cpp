@@ -174,29 +174,23 @@ static void SmemBmFillDramFdInOptions(const smem_bm_create_option_t &smemOpts, h
     }
 }
 
-SMEM_API smem_bm_t smem_bm_create2(uint32_t id, const smem_bm_create_option_t *option)
+int32_t ock::smem::SmemBmEntryInitWithOptions(const SmemBmEntryPtr &entry, const smem_bm_create_option_t *option,
+                                              uint32_t rankId, uint16_t deviceId, uint32_t worldSize,
+                                              const std::string &hcomUrl, const smem_tls_config &hcomTlsConfig)
 {
-    SM_VALIDATE_RETURN(g_smemBmInited, "smem bm not initialized yet", nullptr);
-    SM_VALIDATE_RETURN(SmemBmCreateOptionCheck(option), "option is invalid", nullptr);
-
-    SmemBmEntryPtr entry;
-    auto &manager = SmemBmEntryManager::Instance();
-    SM_ASSERT_RETURN_NOLOG(SmemBmDataOpCheck(option->dataOpType), nullptr);
+    SM_VALIDATE_RETURN(entry != nullptr, "entry is null", SM_INVALID_PARAM);
+    SM_VALIDATE_RETURN(SmemBmCreateOptionCheck(option), "option is invalid", SM_INVALID_PARAM);
+    SM_VALIDATE_RETURN(SmemBmDataOpCheck(option->dataOpType), "invalid data op type", SM_INVALID_PARAM);
     const bool isHostShm = (option->dataOpType & SMEMB_DATA_OP_HOST_SHM) != 0;
     if (isHostShm && (option->localDRAMSize == 0 || option->localHBMSize != 0)) {
         SM_LOG_AND_SET_LAST_ERROR("HOST_SHM op type only supports DRAM shared memory without HBM");
-        return nullptr;
+        return SM_INVALID_PARAM;
     }
     constexpr uint32_t hostShmConflictMask = SMEMB_DATA_OP_SDMA | SMEMB_DATA_OP_HOST_RDMA | SMEMB_DATA_OP_HOST_URMA |
                                              SMEMB_DATA_OP_HOST_TCP | SMEMB_DATA_OP_DEVICE_RDMA | SMEMB_DATA_OP_MTE;
     if (isHostShm && (option->dataOpType & hostShmConflictMask) != 0) {
         SM_LOG_AND_SET_LAST_ERROR("HOST_SHM op type does not support mixing with other data op types");
-        return nullptr;
-    }
-    auto ret = manager.CreateEntryById(id, entry);
-    if (ret != 0 || entry == nullptr) {
-        SM_LOG_AND_SET_LAST_ERROR("create BM entity(" << id << ") failed: " << ret);
-        return nullptr;
+        return SM_INVALID_PARAM;
     }
 
     hybm_options options{};
@@ -205,14 +199,14 @@ SMEM_API smem_bm_t smem_bm_create2(uint32_t id, const smem_bm_create_option_t *o
     options.bmDataOpType = SmemHybmHelper::TransHybmDataOpType(option->dataOpType);
 #if !defined(ASCEND_NPU)
     if ((options.bmDataOpType & HYBM_DOP_TYPE_SDMA) || (options.bmDataOpType & HYBM_DOP_TYPE_DEVICE_RDMA)) {
-        SM_LOG_AND_SET_LAST_ERROR("create BM entity(" << id << ") failed, invalid opType " << options.bmDataOpType
-                                                      << " for non-cann based backend");
-        return nullptr;
+        SM_LOG_AND_SET_LAST_ERROR("create BM entity(" << entry->Id() << ") failed, invalid opType "
+                                                      << options.bmDataOpType << " for non-cann based backend");
+        return SM_ERROR;
     }
 #endif
-    options.rankCount = manager.GetWorldSize();
-    options.rankId = manager.GetRankId();
-    options.devId = manager.GetDeviceId();
+    options.rankCount = worldSize;
+    options.rankId = rankId;
+    options.devId = deviceId;
     options.maxHBMSize = option->maxHbmSize;
     options.maxDRAMSize = option->maxDramSize;
     options.deviceVASpace = option->localHBMSize;
@@ -229,14 +223,13 @@ SMEM_API smem_bm_t smem_bm_create2(uint32_t id, const smem_bm_create_option_t *o
             << "Please set enable56BitsGva = true, "
             << "maxDram=" << option->maxDramSize << ", maxHbm=" << option->maxHbmSize
             << ", rankCount=" << options.rankCount);
-        return nullptr;
+        return SM_ERROR;
     }
     options.enable56BitsGva = option->enable56BitsGva;
     bzero(options.transUrl, sizeof(options.transUrl));
     bzero(options.tag, sizeof(options.tag));
     bzero(options.tagOpInfo, sizeof(options.tagOpInfo));
 
-    smem_tls_config hcomTlsConfig = manager.GetHcomTlsOption();
     options.tlsOption.tlsEnable = hcomTlsConfig.tlsEnable;
     std::copy_n(hcomTlsConfig.caPath, SMEM_TLS_PATH_SIZE, options.tlsOption.caPath);
     std::copy_n(hcomTlsConfig.crlPath, SMEM_TLS_PATH_SIZE, options.tlsOption.crlPath);
@@ -246,16 +239,36 @@ SMEM_API smem_bm_t smem_bm_create2(uint32_t id, const smem_bm_create_option_t *o
     std::copy_n(hcomTlsConfig.packagePath, SMEM_TLS_PATH_SIZE, options.tlsOption.packagePath);
     std::copy_n(hcomTlsConfig.decrypterLibPath, SMEM_TLS_PATH_SIZE, options.tlsOption.decrypterLibPath);
 
-    SM_VALIDATE_RETURN(manager.GetHcomUrl().size() <= 64u, "url size is " << manager.GetHcomUrl().size(), nullptr);
-    (void)std::copy_n(manager.GetHcomUrl().c_str(), manager.GetHcomUrl().size(), options.transUrl);
+    SM_VALIDATE_RETURN(hcomUrl.size() <= 64u, "url size is " << hcomUrl.size(), SM_INVALID_PARAM);
+    (void)std::copy_n(hcomUrl.c_str(), hcomUrl.size(), options.transUrl);
     (void)std::copy_n(option->tag, sizeof(options.tag), options.tag);
     (void)std::copy_n(option->tagOpInfo, sizeof(options.tagOpInfo), options.tagOpInfo);
 
     options.scene = HYBM_SCENE_DEFAULT;
     SmemBmFillDramFdInOptions(*option, options);
-    ret = entry->Initialize(options);
+    auto ret = entry->Initialize(options);
     if (ret != 0) {
         SM_LOG_AND_SET_LAST_ERROR("entry init failed, result: " << ret);
+        return SM_ERROR;
+    }
+    return SM_OK;
+}
+
+SMEM_API smem_bm_t smem_bm_create2(uint32_t id, const smem_bm_create_option_t *option)
+{
+    SM_VALIDATE_RETURN(g_smemBmInited, "smem bm not initialized yet", nullptr);
+    SM_VALIDATE_RETURN(option != nullptr, "option is null", nullptr);
+
+    SmemBmEntryPtr entry;
+    auto &manager = SmemBmEntryManager::Instance();
+    auto ret = manager.CreateEntryById(id, entry);
+    if (ret != 0 || entry == nullptr) {
+        SM_LOG_AND_SET_LAST_ERROR("create BM entity(" << id << ") failed: " << ret);
+        return nullptr;
+    }
+
+    if (SmemBmEntryInitWithOptions(entry, option, manager.GetRankId(), manager.GetDeviceId(), manager.GetWorldSize(),
+                                   manager.GetHcomUrl(), manager.GetHcomTlsOption()) != SM_OK) {
         return nullptr;
     }
     return reinterpret_cast<void *>(entry.Get());

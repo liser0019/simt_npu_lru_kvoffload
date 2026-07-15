@@ -27,7 +27,8 @@ SMEM_API smem_shm_t smem_shm_create(uint32_t id, uint32_t rankSize, uint32_t ran
                        "invalid param, input size: " << rankSize << " limit: " << SMEM_WORLD_SIZE_MAX
                                                      << " input rank: " << rankId,
                        nullptr);
-    SM_VALIDATE_RETURN(!(id > SMEM_ID_MAX), "invalid id, id range is: [0, " << SMEM_ID_MAX << "]", nullptr);
+    SM_VALIDATE_RETURN(id < HYBM_ENTITY_ID_SEGMENT_SIZE,
+                       "invalid id, id range is: [0, " << HYBM_ENTITY_ID_SEGMENT_SIZE << ")", nullptr);
     SM_VALIDATE_RETURN(gva != nullptr, "invalid param, gva is NULL", nullptr);
     SM_VALIDATE_RETURN(g_smemShmInited, "smem shm not initialized yet", nullptr);
     SM_VALIDATE_RETURN(localSize <= SMEM_LOCAL_HBM_SIZE_MAX, "localSize size exceeded", nullptr);

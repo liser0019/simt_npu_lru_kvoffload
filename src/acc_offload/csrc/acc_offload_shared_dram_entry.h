@@ -14,7 +14,8 @@
 
 #include <mutex>
 #include <memory>
-#include "smem_bm_def.h"
+#include <string>
+#include "smem_bm_entry.h"
 #include "acc_offload.h"
 #include "acc_offload_entry.h"
 #include "acc_offload_mem_manager.h"
@@ -48,7 +49,8 @@ public:
 private:
     std::mutex mutex_;
     bool inited_ = false;
-    smem_bm_t bmHandle_ = nullptr;
+    std::string storeUrl_;
+    smem::SmemBmEntryPtr bmEntry_;
     uint8_t *base_ = nullptr;
     uint64_t size_ = 0;
     std::shared_ptr<AccOffloadMemManager> memMng_;

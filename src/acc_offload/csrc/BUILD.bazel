@@ -52,6 +52,7 @@ cc_library(
     deps = [
         "@version_info//:version_info",
         "//src/smem/csrc/config_store:config_store_object",
+        "//src/smem/csrc:smem_src_headers",
         ":acc_offload_src_headers",
         "//src:acc_offload_headers",
         "//src:util_headers",

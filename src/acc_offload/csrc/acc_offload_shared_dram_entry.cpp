@@ -9,14 +9,16 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
  */
-#include <string>
-#include <algorithm>
-#include "smem_bm.h"
+#include "hybm_big_mem.h"
+#include "smem_net_common.h"
+#include "smem_store_factory.h"
 #include "acc_offload_launch.h"
 #include "acc_offload_shared_dram_entry.h"
 
 namespace ock {
 namespace offload {
+
+using namespace ock::smem;
 
 constexpr uint64_t KB = 1024ULL;
 constexpr uint64_t MB = KB * 1024ULL;
@@ -30,33 +32,62 @@ static uint64_t AlignUp(uint64_t value, uint64_t align) noexcept
 int32_t AccOffloadSharedDramEntry::Initialize(const offload_config_t &config)
 {
     std::lock_guard<std::mutex> lock(mutex_);
-
     if (inited_) {
         return OFFLOAD_OK;
     }
 
+    OFFLOAD_ASSERT_RETURN(config.worldSize != 0, OFFLOAD_ERROR);
     int32_t ret = OFFLOAD_OK;
     do {
-        smem_bm_config_t bmCfg {};
-        smem_bm_config_init(&bmCfg);
-        bmCfg.rankId = config.rankId;
-        bmCfg.autoRanking = false;
-        bmCfg.startConfigStoreServer = config.rankId == 0;
-
-        constexpr int portBase = 8500;
-        int port = portBase + config.deviceId / config.worldSize;
-        std::string storeUrl = "tcp://127.0.0.1:" + std::to_string(port);
-        std::copy_n(storeUrl.c_str(), storeUrl.length(), bmCfg.hcomUrl);
-
-        ret = smem_bm_init(storeUrl.c_str(), config.worldSize, config.deviceId, &bmCfg);
+        ret = hybm_init(config.deviceId, 0);
         if (ret != OFFLOAD_OK) {
-            OFFLOAD_LOG_ERROR("smem_bm_init failed, result: " << ret << ", storeUrl: " << storeUrl.c_str());
+            OFFLOAD_LOG_ERROR("hybm_init failed, result: " << ret);
             break;
         }
 
         ret = AccOffloadLaunchApi::TryLoadLibrary();
         if (ret != OFFLOAD_OK) {
             OFFLOAD_LOG_ERROR("offload launch load library failed");
+            break;
+        }
+
+        constexpr int portBase = 8500;
+        int port = portBase + config.deviceId / config.worldSize;
+        std::string storeUrl = "tcp://127.0.0.1:" + std::to_string(port);
+        storeUrl_ = storeUrl;
+
+        smem_bm_config_t bmCfg {};
+        smem_bm_config_init(&bmCfg);
+        bmCfg.rankId = config.rankId;
+        bmCfg.autoRanking = false;
+        bmCfg.startConfigStoreServer = config.rankId == 0;
+
+        UrlExtraction extraction;
+        if (extraction.ExtractIpPortFromUrl(storeUrl) != OFFLOAD_OK) {
+            OFFLOAD_LOG_ERROR("extract ip port from url failed, storeUrl: " << storeUrl);
+            ret = OFFLOAD_ERROR;
+            break;
+        }
+
+        StoreFactory::SetTlsInfo(bmCfg.storeTlsConfig);
+        uint16_t model = bmCfg.startConfigStoreServer ? CSM_BOTH : CSM_CLIENT;
+        auto confStore = StoreFactory::CreateStoreByUrl(storeUrl, model, config.worldSize, config.rankId);
+        if (confStore == nullptr) {
+            OFFLOAD_LOG_ERROR("create store failed, storeUrl: " << storeUrl);
+            ret = OFFLOAD_ERROR;
+            break;
+        }
+
+        auto prefix = "(" + std::to_string(HYBM_ENTITY_ID_OFFLOAD_BASE) + ")_";
+        confStore = StoreFactory::PrefixStore(confStore, "OFFLOAD_");
+        auto entryStore = StoreFactory::PrefixStore(confStore, prefix);
+
+        SmemBmEntryOptions entryOpt {HYBM_ENTITY_ID_OFFLOAD_BASE - HYBM_ENTITY_ID_BM_BASE,
+                                     config.rankId, bmCfg.dynamicWorldSize, bmCfg.controlOperationTimeout};
+        bmEntry_ = SmMakeRef<SmemBmEntry>(entryOpt, entryStore);
+        if (bmEntry_ == nullptr) {
+            OFFLOAD_LOG_ERROR("create bm entry failed, rankId: " << config.rankId);
+            ret = OFFLOAD_ERROR;
             break;
         }
 
@@ -72,28 +103,28 @@ int32_t AccOffloadSharedDramEntry::Initialize(const offload_config_t &config)
         option.dramShmFd = -1;
         option.enable56BitsGva = false;
 
-        bmHandle_ = smem_bm_create2(0, &option);
-        if (bmHandle_ == nullptr) {
-            OFFLOAD_LOG_ERROR("smem_bm_create2 failed, rankId: " << config.rankId
+        ret = SmemBmEntryInitWithOptions(bmEntry_, &option, config.rankId, config.deviceId, config.worldSize,
+                                         storeUrl, bmCfg.hcomTlsConfig);
+        if (ret != OFFLOAD_OK) {
+            OFFLOAD_LOG_ERROR("SmemBmEntryInitWithOptions failed, rankId: " << config.rankId
                               << ", reserveSize: " << alignedReserveSize << ", allocSize: " << alignedAllocSize);
             ret = OFFLOAD_ERROR;
             break;
         }
 
-        ret = smem_bm_join(bmHandle_, 0);
+        ret = bmEntry_->Join(0);
         if (ret != OFFLOAD_OK) {
-            OFFLOAD_LOG_ERROR("smem_bm_join failed, result: " << ret << ", rankId: " << config.rankId);
+            OFFLOAD_LOG_ERROR("bm entry join failed, result: " << ret << ", rankId: " << config.rankId);
             break;
         }
 
-        void *gva = smem_bm_ptr_by_mem_type(bmHandle_, SMEM_MEM_TYPE_HOST, config.rankId);
+        void *gva = bmEntry_->GetHostGvaAddress();
         if (gva == nullptr) {
-            OFFLOAD_LOG_ERROR("smem_bm_ptr_by_mem_type failed");
+            OFFLOAD_LOG_ERROR("get host gva failed");
             ret = OFFLOAD_ERROR;
             break;
         }
-
-        base_ = reinterpret_cast<uint8_t *>(gva);
+        base_ = reinterpret_cast<uint8_t *>(gva) + bmEntry_->GetCoreOptions().maxDRAMSize * config.rankId;
         size_ = alignedReserveSize;
 
         memMng_ = std::make_shared<AccOffloadMemManager>(base_, size_);
@@ -117,20 +148,21 @@ int32_t AccOffloadSharedDramEntry::Initialize(const offload_config_t &config)
 
 void AccOffloadSharedDramEntry::UnInitalize()
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-
     if (!inited_) {
         return;
     }
 
     memMng_.reset();
-    if (bmHandle_ != nullptr) {
-        smem_bm_leave(bmHandle_, 0);
-        smem_bm_destroy(bmHandle_);
-        bmHandle_ = nullptr;
+    if (bmEntry_ != nullptr) {
+        bmEntry_->UnInitalize();
+        bmEntry_ = nullptr;
+    }
+    if (!storeUrl_.empty()) {
+        StoreFactory::DestroyStore(storeUrl_);
+        storeUrl_.clear();
     }
     AccOffloadLaunchApi::CleanupLibrary();
-    smem_bm_uninit(0);
+    hybm_uninit();
 
     base_ = nullptr;
     size_ = 0;

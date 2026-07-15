@@ -39,7 +39,7 @@ int32_t SmemBmEntry::Initialize(const hybm_options &options)
     executorService_.SetThreadName("batch-copy");
 
     do {
-        entity = hybm_create_entity((Id() << 1) + 1U, &options, flags);
+        entity = hybm_create_entity(Id() + HYBM_ENTITY_ID_BM_BASE, &options, flags);
         if (entity == nullptr) {
             SM_LOG_ERROR("create entity failed");
             ret = SM_ERROR;

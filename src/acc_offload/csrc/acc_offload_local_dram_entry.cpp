@@ -48,6 +48,7 @@ int32_t AccOffloadLocalDramEntry::Initialize(const offload_config_t &config)
     if (alignedReserveSize != alignedAllocSize) {
         OFFLOAD_LOG_ERROR("local dram requires reserveSize == allocSize, reserveSize: " << config.reserveSize
                           << ", allocSize: " << config.allocSize);
+        hybm_uninit();
         return OFFLOAD_ERROR;
     }
     hybm_options options{};
@@ -71,7 +72,7 @@ int32_t AccOffloadLocalDramEntry::Initialize(const offload_config_t &config)
             break;
         }
 
-        entity_ = hybm_create_entity(0, &options, flags);
+        entity_ = hybm_create_entity(HYBM_ENTITY_ID_OFFLOAD_BASE, &options, flags);
         if (entity_ == nullptr) {
             OFFLOAD_LOG_ERROR("create entity failed");
             ret = OFFLOAD_ERROR;
@@ -116,8 +117,6 @@ int32_t AccOffloadLocalDramEntry::Initialize(const offload_config_t &config)
 
 void AccOffloadLocalDramEntry::UnInitalize()
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-
     if (!inited_) {
         return;
     }

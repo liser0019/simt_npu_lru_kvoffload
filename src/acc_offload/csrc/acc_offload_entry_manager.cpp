@@ -69,7 +69,6 @@ int32_t AccOffloadEntryManager::Initialize(const offload_config_t &config)
 
 void AccOffloadEntryManager::UnInitalize()
 {
-    std::lock_guard<std::mutex> lock(mutex_);
     if (!inited_) {
         return;
     }

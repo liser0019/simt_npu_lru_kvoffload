@@ -15,6 +15,9 @@ include_directories(
         ${PROJECT_ACC_OFFLOAD_SRC_BASE}/csrc/allocator
         ${PROJECT_ACC_OFFLOAD_SRC_BASE}/csrc/launch
         ${PROJECT_ACC_OFFLOAD_SRC_BASE}/csrc/operators
+        ${PROJECT_SMEM_SRC_BASE}/csrc/smem_bm
+        ${PROJECT_SMEM_SRC_BASE}/csrc/common
+        ${PROJECT_SMEM_SRC_BASE}/csrc/net
         ${PROJECT_HYBM_SRC_BASE}/include
         ${PROJECT_UTIL_SRC_BASE}/ptracer/include
         ${PROJECT_ACCLINKS_SRC_BASE}/include
