@@ -9,99 +9,108 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
 */
-#include <cstring>
-#include <random>
-#include <stdexcept>
-#include <sys/socket.h>
-#include <arpa/inet.h>
-#include <unistd.h>
-#include <cerrno>
-#include <sstream>
+#include <cctype>
+#include <cstdlib>
+#include <string>
 
+#include "acc_tcp_port_util.h"
 #include "adapter_logger.h"
+#include "mf_env_define.h"
+#include "mf_env_util.h"
 #include "smem.h"
 #include "transfer_util.h"
 
 namespace ock {
 namespace adapter {
 
-static int BindTcpPortV4(int &sockfd, int port)
+uint16_t AccFindAvailableTcpPortAdapter(int &sockfd)
 {
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd != -1) {
-        int on_v4 = 1;
-        if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &on_v4, sizeof(on_v4)) == 0) {
-            sockaddr_in bind_address_v4{};
-            bind_address_v4.sin_family = AF_INET;
-            bind_address_v4.sin_port = htons(port);
-            bind_address_v4.sin_addr.s_addr = INADDR_ANY;
-
-            if (bind(sockfd, reinterpret_cast<sockaddr *>(&bind_address_v4), sizeof(bind_address_v4)) == 0) {
-                return 0;
-            }
-        }
-        close(sockfd);
-        sockfd = -1;
-    }
-    return -1;
+    uint16_t minPort = DEFAULT_PORT_START;
+    uint16_t maxPort = DEFAULT_PORT_MAX;
+    GetConfigStorePortRange(minPort, maxPort);
+    return ock::acc::AccFindAvailableTcpPort(sockfd, minPort, maxPort);
 }
 
-static int BindTcpPortV6(int &sockfd, int port)
+void ParseIpPortFromUniqueId(const std::string &uniqueId, std::string &ip, uint16_t &port)
 {
-    sockfd = socket(AF_INET6, SOCK_STREAM, 0);
-    if (sockfd != -1) {
-        int on_v6 = 1;
-        if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &on_v6, sizeof(on_v6)) == 0) {
-            sockaddr_in6 bind_address_v6{};
-            bind_address_v6.sin6_family = AF_INET6;
-            bind_address_v6.sin6_port = htons(port);
-            bind_address_v6.sin6_addr = in6addr_any;
-
-            if (bind(sockfd, reinterpret_cast<sockaddr *>(&bind_address_v6), sizeof(bind_address_v6)) == 0) {
-                return 0;
-            }
-        }
-        close(sockfd);
-        sockfd = -1;
+    ip.clear();
+    port = 0;
+    auto pos = uniqueId.rfind(':');
+    if (pos == std::string::npos) {
+        ip = uniqueId;
+        ADAPTER_LOG_INFO("uniqueId='" << uniqueId << "' has no port suffix, auto-select port");
+        return;
     }
-    return -1;
+    if (pos + 1 >= uniqueId.size()) {
+        ip = uniqueId.substr(0, pos);
+        ADAPTER_LOG_INFO("uniqueId='" << uniqueId << "' has empty port suffix, auto-select port");
+        return;
+    }
+    const std::string portStr = uniqueId.substr(pos + 1);
+    for (char c : portStr) {
+        if (!std::isdigit(static_cast<unsigned char>(c))) {
+            ip = uniqueId;
+            ADAPTER_LOG_WARN("uniqueId='" << uniqueId << "' port suffix '" << portStr
+                                          << "' is non-numeric, treat whole as ip and auto-select port");
+            return;
+        }
+    }
+    unsigned long parsed = 0;
+    try {
+        parsed = std::stoul(portStr);
+    } catch (...) {
+        ip = uniqueId;
+        ADAPTER_LOG_WARN("uniqueId='" << uniqueId << "' port suffix '" << portStr
+                                      << "' is out of range, auto-select port");
+        return;
+    }
+    if (parsed > 65535UL) {
+        ip = uniqueId;
+        ADAPTER_LOG_WARN("uniqueId='" << uniqueId << "' port " << parsed << " > 65535, auto-select port");
+        return;
+    }
+    ip = uniqueId.substr(0, pos);
+    port = static_cast<uint16_t>(parsed);
 }
 
-uint16_t findAvailableTcpPort(int &sockfd)
+std::string BuildSessionId(const std::string &ip, uint16_t port)
 {
-    static std::random_device rd;
-    const int min_port = 15000;
-    const int max_port = 25000;
-    const int max_attempts = 1000;
-    const int offset_bit = 32;
-    uint64_t seed = 1;
-    seed |= static_cast<uint64_t>(getpid()) << offset_bit;
-    seed |= static_cast<uint64_t>(std::chrono::system_clock::now().time_since_epoch().count()) & 0xFFFFFFFFULL;
-    static std::mt19937_64 gen(seed);
-    std::uniform_int_distribution<> dis(min_port, max_port);
+    return ip + ":" + std::to_string(port);
+}
 
-    bool supports_ipv6 = false;
-    int sockfd_check = socket(AF_INET6, SOCK_STREAM, 0);
-    if (sockfd_check != -1) {
-        supports_ipv6 = true;
-        close(sockfd_check);
-    }
+void GetConfigStorePortRange(uint16_t &minPort, uint16_t &maxPort)
+{
+    minPort = DEFAULT_PORT_START;
+    maxPort = DEFAULT_PORT_MAX;
 
-    for (int attempt = 0; attempt < max_attempts; ++attempt) {
-        int port = dis(gen);
-        auto ret = BindTcpPortV4(sockfd, port);
-        if (ret == 0) {
-            return port;
+    // Read the env var live (each call) so the range is adjustable at runtime
+    // and unit-testable via setenv (the static-initialized ock::mf::env::* consts
+    // cache the value once at program start and cannot be changed later).
+    const auto parsePort = [](const char *envName, uint16_t def, uint16_t &out) {
+        out = def;
+        const char *val = std::getenv(envName);
+        if (val == nullptr || val[0] == '\0') {
+            return;
         }
-        if (supports_ipv6) {
-            ret = BindTcpPortV6(sockfd, port);
-            if (ret == 0) {
-                return port;
-            }
+        uint32_t parsed = 0;
+        if (!ock::mf::MfEnvUtil::GetUint(std::string(val), parsed) || parsed > 65535UL) {
+            ADAPTER_LOG_WARN("invalid port env " << envName << "='" << val << "', fallback to " << def);
+            return;
         }
+        out = static_cast<uint16_t>(parsed);
+    };
+
+    uint16_t startP = DEFAULT_PORT_START;
+    uint16_t endP = DEFAULT_PORT_MAX;
+    parsePort("MF_CONFIG_STORE_PORT_START", DEFAULT_PORT_START, startP);
+    parsePort("MF_CONFIG_STORE_PORT_END", DEFAULT_PORT_MAX, endP);
+    if (startP > endP) {
+        ADAPTER_LOG_WARN("invalid port range start=" << startP << " > end=" << endP << ", fallback to default ["
+                                                     << DEFAULT_PORT_START << "," << DEFAULT_PORT_MAX << "]");
+        return;
     }
-    ADAPTER_LOG_ERROR("Not find a available tcp port");
-    return 0;
+    minPort = startP;
+    maxPort = endP;
 }
 
 int32_t pytransfer_create_config_store(const char *storeUrl)
@@ -137,20 +146,6 @@ int32_t pytransfer_set_log_level(int level)
 int32_t pytransfer_set_conf_store_tls(bool enable, std::string &tls_info)
 {
     return smem_set_conf_store_tls(enable, tls_info.c_str(), tls_info.size());
-}
-
-std::vector<std::string> ParseMultiStoreUrl(const std::string &storeUrl)
-{
-    std::vector<std::string> urls;
-    std::istringstream stream(storeUrl);
-    std::string token;
-    while (std::getline(stream, token, ';')) {
-        if (!token.empty()) {
-            urls.push_back(token);
-        }
-    }
-    ADAPTER_LOG_INFO("parsed " << urls.size() << " store urls from: " << storeUrl);
-    return urls;
 }
 
 } // namespace adapter

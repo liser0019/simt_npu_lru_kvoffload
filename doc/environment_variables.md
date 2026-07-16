@@ -21,6 +21,23 @@
 | `ASCEND_MF_STORE_URL` | 无（必填） | MemFabric Store URL，用于Transfer Engine初始化时连接配置存储。格式如`tcp://ip:port`。 |
 | `ACCLINK_CHECK_PERIOD_HOURS` | 24 | 控制路径SSL证书定期检查周期（小时），有效范围1-168。 |
 | `ACCLINK_CERT_CHECK_AHEAD_DAYS` | 30 | 证书提前检查天数，在证书过期前多少天开始告警，有效范围1-365。 |
+| `MF_HYBM_RDMA_SWAP_SPACE_SIZE` | NPU: 1GB<br>其他: 4GB | RDMA交换空间大小（单位MB），用于host_rdma/device_rdma数据传输的中转内存。 |
+| `MF_HYBM_RDMA_FORCE_UNREGISTERED` | 0 | 强制RDMA跳过内存注册检查路径。设为非0值时，`BatchDataCopy`直接走未注册路径发起RDMA读写。 |
+| `MF_LOG_LEVEL` | 无 | MemFabric日志级别，取值范围0-4（0:DEBUG, 1:INFO, 2:WARN, 3:ERROR, 4:OFF）。**仅Python接口下生效，bm/shm场景不生效。** |
+| `MF_CONFIG_STORE_URL` | 无（必填） | MemFabric Store URL，用于Transfer Engine初始化时连接配置存储。格式如`tcp://ip:port`。 |
+| `MF_CONFIG_STORE_PORT_START` | 9000 | Config Store可用端口范围起始值，与`MF_CONFIG_STORE_PORT_END`配合使用。TransferEngine在`session_id`未指定端口（如`ip`/`ip:0`）时自动选端口亦使用此范围。 |
+| `MF_CONFIG_STORE_PORT_END` | 65535 | Config Store可用端口范围结束值。 |
+| `MF_SOCKET_URL` | 无 | 调试用的socket URL，覆盖 config store 的连接地址。 |
+| `MF_TRANSPORT_MANAGER` | 无 | 传输管理器选择，用于调试指定传输层实现。 |
+| `MF_GROUP_JOIN_MAX_TIMEOUT` | 600 | 集群加入最大超时时间（秒），适用于BM和Transfer模块的Join操作。 |
+| `MF_GROUP_RETRY_TIME` | 5 | 集群更新（GroupUpdate）重试次数，适用于BM和Transfer模块。 |
+| `MF_ACC_CHECK_PERIOD_HOURS` | 168 | 控制路径SSL证书定期检查周期（小时），有效范围24-720。 |
+| `MF_ACC_CERT_CHECK_AHEAD_DAYS` | 30 | 证书提前检查天数，在证书过期前多少天开始告警，有效范围7-180。 |
+| `MF_HCOM_CQ_DEPTH` | 无 | HCOM完成队列深度，设置后覆盖默认值。 |
+| `MF_HCOM_SQ_SIZE` | 无 | HCOM发送队列大小，设置后覆盖默认值。 |
+| `MF_HCOM_RQ_SIZE` | 无 | HCOM接收队列大小，设置后覆盖默认值。 |
+| `MF_HCOM_PREPOST_SIZE` | 无 | HCOM预投递大小，设置后覆盖默认值。 |
+| `MF_HCOM_MAX_SEND_RECV_DATA_CNT` | 无 | HCOM最大发送接收数据计数，设置后覆盖默认值。 |
 
 ## 构建时环境变量
 

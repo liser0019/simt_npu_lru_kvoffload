@@ -134,7 +134,7 @@ private:
     void AddRemoteInfo(uint32_t rk, std::vector<void *> &global, std::vector<LocalMapAddress> &local);
     smem_trans_role_t QueryRole(uint32_t rk);
 
-    bool ParseTransName(const std::string &name, ock::mf::net_addr_t &ip, uint16_t &port, uint32_t &reserved);
+    bool ParseTransName(const std::string &name, ock::mf::net_addr_t &ip, uint16_t &port);
     void RemoveRanks(std::vector<uint32_t> &rankSet);
     Result ParseNameToUniqueId(const std::string &name, WorkerId &uniqueId);
     void AlignMemory(const void *&address, uint64_t &size);

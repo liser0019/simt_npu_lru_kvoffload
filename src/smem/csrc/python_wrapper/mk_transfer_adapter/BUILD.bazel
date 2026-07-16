@@ -78,6 +78,7 @@ cc_library (
         "@pybind11//:pybind11",
         "@version_info//:version_info",
         "//src:util_headers",
+        "//src/acc_links/csrc:acc_tcp_net_static",
         "//src:smem_headers",
         ":py_transfer_headers",
     ],

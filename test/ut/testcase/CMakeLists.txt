@@ -6,7 +6,8 @@ file(GLOB_RECURSE memfabric_src
 )
 ADD_UNIT_TEST(test_memfabric
         FILES ${memfabric_src} ${TEST_SRC_PATHS}/ut_main.cpp
-        INCLUDE_PATHS ${TEST_INCLUDE_PATHS}
+                ${PROJECT_SMEM_SRC_BASE}/csrc/python_wrapper/mk_transfer_adapter/csrc/transfer_util.cpp
+        INCLUDE_PATHS ${TEST_INCLUDE_PATHS} ${PROJECT_SMEM_SRC_BASE}/csrc/python_wrapper/mk_transfer_adapter/include
         LINK_LIBRARIES ${TEST_DEPEND_LIBS}
         BUILD_FLAGS -fpermissive --coverage
 )

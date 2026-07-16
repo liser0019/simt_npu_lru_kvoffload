@@ -15,7 +15,9 @@
 #include "pytransfer.h"
 #include <thread>
 #include <chrono>
+#include <cctype>
 #include <iostream>
+#include <unistd.h>
 #include <pybind11/stl.h>
 #include "transfer_util.h"
 #include "adapter_logger.h"
@@ -76,41 +78,94 @@ int TransferAdapterPy::Initialize(const char *storeUrl, const char *uniqueId, co
     config_.role = (strcmp(role, "Prefill") == 0) ? SMEM_TRANS_SENDER : SMEM_TRANS_RECEIVER;
     config_.deviceId = deviceId;
     config_.dataOpType = static_cast<smem_bm_data_op_type>(dataOpType);
-    sessionId_ = uniqueId;
-    
-    bool isStoreServer = (strcmp(storeServerRole, role) == 0);
-    auto urlList = ParseMultiStoreUrl(std::string(storeUrl));
-    configStoreProtocol_ = GetConfigStoreProtocol(urlList);
-
-    ADAPTER_LOG_INFO("Begin to initialize trans");
+    configStoreProtocol_ = GetConfigStoreProtocol(std::string(storeUrl));
     ret = smem_trans_init(&config_);
     ADAPTER_LOG_ERROR_RETURN_IT_IF_NOT_OK(ret, "Failed to init smem_trans, ret=" << ret);
+
+    bool isStoreServer = (strcmp(storeServerRole, role) == 0);
+    std::string ip;
+    uint16_t port = 0;
+    ParseIpPortFromUniqueId(std::string(uniqueId), ip, port);
+    ADAPTER_LOG_INFO("Begin to initialize trans, role=" << role << ", uniqueId=" << uniqueId << ", ip=" << ip
+                                                        << ", port=" << port << ", isStoreServer=" << isStoreServer);
+
     if (isStoreServer) {
-        std::string myUrl = configStoreProtocol_ + GetSessionPrefixFromId(uniqueId);
-        ADAPTER_ASSERT_RETURN(!myUrl.empty(), "failed to find store URL", -1);
-        ret = smem_create_config_store(myUrl.c_str(), SMEM_STORE_SKIP_RECOVER);
-        if (ret != 0) {
-            ADAPTER_LOG_ERROR("smem_create_config_store failed, ret=" << ret);
-            return ret;
-        }
-        handle_ = smem_trans_create(myUrl.c_str(), uniqueId, &config_);
-        ADAPTER_ASSERT_RETURN(handle_ != nullptr, "smem_trans_create failed", -1);
-        ADAPTER_LOG_INFO("initialized as store server, storeUrl=" << myUrl);
-        return 0;
-    } else {
-        StartLinkDownConsumer();
-        ADAPTER_LOG_INFO("initialized as store client");
+        return InitStoreServer(ip, port);
     }
+    return InitStoreClient(ip, port);
+}
+
+int TransferAdapterPy::InitStoreServer(const std::string &ip, uint16_t port)
+{
+    int32_t ret = 0;
+    std::string myUrl;
+    if (port == 0) {
+        uint16_t candidatePort = 0;
+        for (uint32_t i = 0; i < PORT_SELECT_MAX_RETRY; ++i) {
+            int probeFd = -1;
+            candidatePort = AccFindAvailableTcpPortAdapter(probeFd);
+            if (candidatePort == 0) {
+                ADAPTER_LOG_ERROR("no available port for store server, ip=" << ip << ", attempt=" << i);
+                return -1;
+            }
+            close(probeFd); // release so the real listener can bind+listen
+            sessionId_ = BuildSessionId(ip, candidatePort);
+            myUrl = configStoreProtocol_ + sessionId_;
+            ret = smem_create_config_store(myUrl.c_str(), SMEM_STORE_SKIP_RECOVER);
+            if (ret == 0) {
+                break;
+            }
+            ADAPTER_LOG_WARN("allocate store server port after " << PORT_SELECT_MAX_RETRY << " retries, ip=" << ip);
+            candidatePort = 0;
+        }
+        if (candidatePort == 0) {
+            ADAPTER_LOG_ERROR("failed to allocate store server port after " << PORT_SELECT_MAX_RETRY
+                                                                            << " retries, ip=" << ip);
+            return -1;
+        }
+        port = candidatePort;
+    } else {
+        sessionId_ = BuildSessionId(ip, port);
+        myUrl = configStoreProtocol_ + sessionId_;
+        ret = smem_create_config_store(myUrl.c_str(), SMEM_STORE_SKIP_RECOVER);
+        ADAPTER_LOG_ERROR_RETURN_IT_IF_NOT_OK(ret,
+                                              "smem_create_config_store failed, storeUrl=" << myUrl << ", ret=" << ret);
+    }
+
+    handle_ = smem_trans_create(myUrl.c_str(), sessionId_.c_str(), &config_);
+    if (handle_ == nullptr) {
+        ADAPTER_LOG_ERROR("smem_trans_create failed, storeUrl=" << myUrl << ", sessionId=" << sessionId_);
+        return -1;
+    }
+    rpcPort_ = port;
+    ADAPTER_LOG_INFO("initialized as store server, storeUrl=" << myUrl << ", rpcPort=" << port);
     return 0;
 }
 
-std::string TransferAdapterPy::GetRpcPort()
+int TransferAdapterPy::InitStoreClient(const std::string &ip, uint16_t port)
 {
-    int rpcPort = static_cast<int>(findAvailableTcpPort(sockfd_));
-    pid_t current_pid = getpid();
-    std::string port_with_pid = std::to_string(rpcPort) + "_" + std::to_string(current_pid);
-    ADAPTER_LOG_INFO("Get rpcPort (port_pid) is " << port_with_pid);
-    return port_with_pid;
+    uint16_t candidatePort = port;
+    if (candidatePort == 0) {
+        candidatePort = AccFindAvailableTcpPortAdapter(sockfd_); // probe + keep sockfd_ bound (reserve for uniqueness)
+        if (candidatePort == 0) {
+            ADAPTER_LOG_ERROR("no available port for client session id, ip=" << ip);
+            return -1;
+        }
+    }
+    sessionId_ = BuildSessionId(ip, candidatePort);
+    rpcPort_ = candidatePort;
+    StartLinkDownConsumer();
+    ADAPTER_LOG_INFO("initialized as store client, session=" << sessionId_ << ", rpcPort=" << candidatePort);
+    return 0;
+}
+
+int TransferAdapterPy::GetRpcPort()
+{
+    if (rpcPort_ == 0) {
+        ADAPTER_LOG_WARN("get_rpc_port returns 0; call initialize() first to get the real listening port");
+    }
+    ADAPTER_LOG_INFO("Get rpcPort is " << rpcPort_);
+    return static_cast<int>(rpcPort_);
 }
 
 int TransferAdapterPy::TransferSyncWrite(const char *destUniqueId, uintptr_t buffer, uintptr_t peer_buffer_address,
@@ -392,12 +447,16 @@ int TransferAdapterPy::BatchTransferWriteWithQuant(const char *destUniqueId,
 int TransferAdapterPy::RegisterMemory(uintptr_t buffer_addr, size_t capacity)
 {
     if (handle_ == nullptr) {
-        for (const auto &m : registeredMems_) {
-            if (m.addr == buffer_addr && m.capacity == capacity) return 0;
+        {
+            std::lock_guard<std::mutex> regLock(regMemMutex_);
+            for (const auto &m : registeredMems_) {
+                if (m.addr == buffer_addr && m.capacity == capacity)
+                    return 0;
+            }
+            registeredMems_.push_back({buffer_addr, capacity});
+            ADAPTER_LOG_INFO("P registered memory addr=0x" << std::hex << buffer_addr << std::dec << " size="
+                                                           << capacity << " (total: " << registeredMems_.size() << ")");
         }
-        registeredMems_.push_back({buffer_addr, capacity});
-        ADAPTER_LOG_INFO("P registered memory addr=0x" << std::hex << buffer_addr
-            << std::dec << " size=" << capacity << " (total: " << registeredMems_.size() << ")");
 
         std::lock_guard<std::mutex> lock(connMutex_);
         for (auto &entry : connections_) {
@@ -442,17 +501,21 @@ int TransferAdapterPy::BatchRegisterMemory(std::vector<uintptr_t> buffer_addrs, 
     }
 
     if (handle_ == nullptr) {
-        for (size_t i = 0; i < count; ++i) {
-            bool dup = false;
-            for (const auto &m : registeredMems_) {
-                if (m.addr == buffer_addrs[i] && m.capacity == capacities[i]) {
-                    dup = true;
-                    break;
+        {
+            std::lock_guard<std::mutex> regLock(regMemMutex_);
+            for (size_t i = 0; i < count; ++i) {
+                bool dup = false;
+                for (const auto &m : registeredMems_) {
+                    if (m.addr == buffer_addrs[i] && m.capacity == capacities[i]) {
+                        dup = true;
+                        break;
+                    }
                 }
+                if (!dup)
+                    registeredMems_.push_back({buffer_addrs[i], capacities[i]});
             }
-            if (!dup) registeredMems_.push_back({buffer_addrs[i], capacities[i]});
+            ADAPTER_LOG_INFO("P batch registered " << count << " memories (total: " << registeredMems_.size() << ")");
         }
-        ADAPTER_LOG_INFO("P batch registered " << count << " memories (total: " << registeredMems_.size() << ")");
 
         std::lock_guard<std::mutex> lock(connMutex_);
         for (auto &entry : connections_) {
@@ -513,45 +576,45 @@ void TransferAdapterPy::TransferDestroy()
             }
         }
         connections_.clear();
-        registeredMems_.clear();
-    } else if (handle_ != nullptr) {
+    } else {
         // receiver or legacy single-store: destroy direct handle
         smem_trans_destroy(handle_, 0);
         handle_ = nullptr;
     }
+
+    {
+        std::lock_guard<std::mutex> regLock(regMemMutex_);
+        registeredMems_.clear();
+    }
+
+    if (sockfd_ != -1) {
+        close(sockfd_); // release the reserved client session port
+        sockfd_ = -1;
+    }
+    rpcPort_ = 0;
 }
 
 void TransferAdapterPy::UnInitialize()
 {
     StopLinkDownConsumer();
+    if (sockfd_ != -1) {
+        close(sockfd_);
+        sockfd_ = -1;
+    }
+    rpcPort_ = 0;
     smem_trans_uninit(0);
 }
 
 // === connection management ===
-std::string TransferAdapterPy::GetConfigStoreProtocol(const std::vector<std::string> &urlList)
+std::string TransferAdapterPy::GetConfigStoreProtocol(const std::string &storeUrl)
 {
-    std::string tcpProtocol = "tcp://";
-    if (urlList.empty()) {
+    constexpr std::string::size_type protocolLen = 3; // length of "://"
+    const std::string tcpProtocol = "tcp://";
+    auto pos = storeUrl.find("://");
+    if (pos == std::string::npos) {
         return tcpProtocol;
     }
-    auto pos = urlList[0].find("://");
-    auto protocolLen = 3;
-    std::string protocol = tcpProtocol;
-    if (pos != std::string::npos) {
-        protocol = urlList[0].substr(0, pos + protocolLen);
-    }
-    return protocol;
-}
-
-std::string TransferAdapterPy::GetSessionPrefixFromId(const std::string &sessionId)
-{
-    // session_id format: "IP:PORT_PID"
-    auto underscorePos = sessionId.rfind('_');
-    if (underscorePos != std::string::npos) {
-        return sessionId.substr(0, underscorePos);
-    }
-    // no PID suffix, use the whole string as prefix
-    return sessionId;
+    return storeUrl.substr(0, pos + protocolLen);
 }
 
 smem_trans_t TransferAdapterPy::GetOrCreateConnection(const std::string &sessionId)
@@ -573,9 +636,11 @@ smem_trans_t TransferAdapterPy::GetOrCreateConnection(const std::string &session
     pendingConnections_.insert(sessionId);
     lock.unlock();
 
-    std::string storeUrl = configStoreProtocol_ + GetSessionPrefixFromId(sessionId);
-    if (storeUrl.empty()) {
-        ADAPTER_LOG_ERROR("no store URL for session: " << sessionId);
+    // session_id format is now "IP:PORT" (no _pid suffix), the store URL prefix
+    // is the session_id itself.
+    std::string storeUrl = configStoreProtocol_ + sessionId;
+    if (storeUrl.empty() || sessionId.empty()) {
+        ADAPTER_LOG_ERROR("no store URL for session: " << sessionId << ", storeUrl=" << storeUrl);
         lock.lock();
         pendingConnections_.erase(sessionId);
         connCv_.notify_all();
@@ -615,16 +680,24 @@ smem_trans_t TransferAdapterPy::GetOrCreateConnection(const std::string &session
 
 void TransferAdapterPy::ReplayRegisteredMemories(smem_trans_t handle)
 {
-    if (registeredMems_.empty() || handle == nullptr) {
+    if (handle == nullptr) {
         return;
     }
+    std::vector<RegMem> snapshot;
+    {
+        std::lock_guard<std::mutex> lock(regMemMutex_);
+        if (registeredMems_.empty()) {
+            return;
+        }
+        snapshot = registeredMems_;
+    }
 
-    const size_t count = registeredMems_.size();
+    const size_t count = snapshot.size();
     std::vector<void *> addrs(count);
     std::vector<size_t> caps(count);
     for (size_t i = 0; i < count; ++i) {
-        addrs[i] = reinterpret_cast<void *>(registeredMems_[i].addr);
-        caps[i] = registeredMems_[i].capacity;
+        addrs[i] = reinterpret_cast<void *>(snapshot[i].addr);
+        caps[i] = snapshot[i].capacity;
     }
 
     ADAPTER_LOG_INFO("replaying " << count << " registered memories on new connection");

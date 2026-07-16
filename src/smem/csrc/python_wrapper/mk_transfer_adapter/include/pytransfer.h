@@ -52,7 +52,7 @@ public:
     int Initialize(const char *storeUrl, const char *uniqueId, const char *role, uint32_t deviceId,
                    TransDataOpType dataOpType, const char *storeServerRole = "Decode");
 
-    std::string GetRpcPort();
+    int GetRpcPort();
 
     int TransferSyncWrite(const char *destUniqueId, uintptr_t buffer, uintptr_t peer_buffer_address, size_t length,
                           uint32_t flags);
@@ -113,8 +113,13 @@ public:
 
 private:
     // === configuration ===
-    std::string GetConfigStoreProtocol(const std::vector<std::string> &urlList);
-    std::string GetSessionPrefixFromId(const std::string &sessionId);
+    std::string GetConfigStoreProtocol(const std::string &storeUrl);
+
+    // === store initialization ===
+    int InitStoreServer(const std::string &ip, uint16_t port);
+
+    // store-client path: no real listener; picks a port
+    int InitStoreClient(const std::string &ip, uint16_t port);
 
     // === connection management ===
     smem_trans_t GetOrCreateConnection(const std::string &sessionId);
@@ -127,9 +132,10 @@ private:
     void StopLinkDownConsumer();
 
     smem_trans_t handle_ = nullptr;   // direct handle (receiver or legacy single-store sender)
-    std::string sessionId_;           // sender session id
+    std::string sessionId_;           // local session id, format "IP:PORT"
     smem_trans_config_t config_{};    // transfer config
     std::string configStoreProtocol_; // transfer config store protocol
+    uint16_t rpcPort_ = 0;            // real listening port (set in Initialize)
 
     // session_id → connection
     struct DConnection {
@@ -147,6 +153,7 @@ private:
         size_t capacity;
     };
     std::vector<RegMem> registeredMems_;
+    std::mutex regMemMutex_; // protects registeredMems_
 
     // link down async cleanup
     std::queue<std::string> linkDownQueue_;
@@ -155,7 +162,8 @@ private:
     std::thread linkDownConsumerThread_;
     std::atomic<bool> consumerRunning_{false};
 
-    // legacy socket fd
+    // probe socket held bound for the store-client to reserve its session port;
+    // -1 for the store-server (the config-store listener holds the port).
     int sockfd_ = -1;
 };
 

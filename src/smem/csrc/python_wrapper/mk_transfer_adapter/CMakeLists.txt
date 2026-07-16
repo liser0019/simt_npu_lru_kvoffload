@@ -15,6 +15,7 @@ add_compile_definitions(_GLIBCXX_USE_CXX11_ABI=0)
 include_directories(
         ${PROJECT_SMEM_SRC_BASE}/include/host
         ${PROJECT_SMEM_SRC_BASE}/csrc/under_api/hybm_core
+        ${PROJECT_ACCLINKS_SRC_BASE}/include
         ${PROJECT_ADAPTER_SRC_BASE}/include
 )
 

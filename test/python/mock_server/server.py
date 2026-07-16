@@ -909,8 +909,6 @@ class MfTest(TestServer):
     def transfer_engine_initialize(self, store_url: str, session_id: str, role: str, device_id: int, op_type: int,
                                    store_server_role: str):
         engine = TransferEngine()
-        # 只掉接口暂时不用
-        port = engine.get_rpc_port()
         if op_type == 1:
             data_op_type = TransferEngine.TransDataOpType.SDMA
         elif op_type == 2:
@@ -930,9 +928,12 @@ class MfTest(TestServer):
         if ret_value == 0:
             addr = id(engine)
             self._transfer_engine_dic[addr] = engine
+            # get_rpc_port must be called after initialize to return the real listening port
+            port = engine.get_rpc_port()
+            self.cli_print(f"transfer engine initialize finish:{addr}, rpc_port:{port}")
         else:
             addr = 0
-        self.cli_print(f"transfer engine initialize finish:{addr}")
+            self.cli_print(f"transfer engine initialize finish:{addr}")
 
     @result_handler
     def transfer_engine_register_memory(self, handle_id: int, buffers: int, capacities: int):

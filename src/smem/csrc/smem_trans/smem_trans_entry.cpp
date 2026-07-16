@@ -21,7 +21,6 @@
 #include <chrono>
 
 #include "mf_syntactic_sugar.h"
-#include "mf_str_util.h"
 #include "hybm.h"
 #include "hybm_big_mem.h"
 #include "hybm_data_op.h"
@@ -74,7 +73,7 @@ SmemTransEntry::~SmemTransEntry()
 int32_t SmemTransEntry::Initialize()
 {
     SM_VALIDATE_RETURN(rankId_ < SMEM_TRANS_RANK_COUNT_MAX, "rankId:" << rankId_ << " is too large.", SM_INVALID_PARAM);
-    if (!ParseTransName(name_, workerUniqueId_.address, workerUniqueId_.port, workerUniqueId_.pid)) {
+    if (!ParseTransName(name_, workerUniqueId_.address, workerUniqueId_.port)) {
         return SM_INVALID_PARAM;
     }
     SM_LOG_ERROR_RETURN_IT_IF_NOT_OK(CreateGlobalTeam(rankId_), "create global team failed");
@@ -780,14 +779,12 @@ Result SmemTransEntry::BatchQuantTransfer(smem_trans_quant_copy_param_t *params,
     return ret;
 }
 
-bool SmemTransEntry::ParseTransName(const std::string &name, ock::mf::net_addr_t &ip, uint16_t &port,
-                                    uint32_t &reserved)
+bool SmemTransEntry::ParseTransName(const std::string &name, ock::mf::net_addr_t &ip, uint16_t &port)
 {
     UrlExtraction extraction;
-    std::vector<std::string> splitRes = mf::StrUtil::Split(name, '_');
-    int ret = extraction.ExtractIpPortFromUrl(std::string("tcp://").append(splitRes[0]));
+    int ret = extraction.ExtractIpPortFromUrl(std::string("tcp://").append(name));
     if (ret != 0) {
-        SM_LOG_ERROR("parse name failed: " << ret);
+        SM_LOG_ERROR("parse name failed, name=" << name << ", ret=" << ret);
         return false;
     }
 
@@ -805,12 +802,6 @@ bool SmemTransEntry::ParseTransName(const std::string &name, ock::mf::net_addr_t
         ip.type = ock::mf::IpV4;
     }
     port = extraction.port;
-    long tmpPid = 0;
-    size_t resSize = 2UL;
-    if (splitRes.size() < resSize || !mf::StrUtil::String2Int<long>(splitRes[1], tmpPid)) {
-        SM_LOG_INFO("split pid info from uniqueid failed.");
-    }
-    reserved = tmpPid;
     return true;
 }
 
@@ -847,7 +838,7 @@ Result SmemTransEntry::ParseNameToUniqueId(const std::string &name, WorkerId &un
         uniqueId = it->second;
         return SM_OK;
     }
-    auto success = ParseTransName(name, workerUniqueId.address, workerUniqueId.port, workerUniqueId.pid);
+    auto success = ParseTransName(name, workerUniqueId.address, workerUniqueId.port);
     if (!success) {
         SM_LOG_ERROR("parse name failed.");
         return SM_INVALID_PARAM;
