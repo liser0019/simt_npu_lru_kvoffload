@@ -15,7 +15,6 @@
 
 #include "acc_tcp_port_util.h"
 #include "adapter_logger.h"
-#include "mf_env_define.h"
 #include "mf_env_util.h"
 #include "smem.h"
 #include "transfer_util.h"
@@ -88,13 +87,12 @@ void GetConfigStorePortRange(uint16_t &minPort, uint16_t &maxPort)
     // cache the value once at program start and cannot be changed later).
     const auto parsePort = [](const char *envName, uint16_t def, uint16_t &out) {
         out = def;
-        const char *val = std::getenv(envName);
-        if (val == nullptr || val[0] == '\0') {
-            return;
-        }
         uint32_t parsed = 0;
-        if (!ock::mf::MfEnvUtil::GetUint(std::string(val), parsed) || parsed > 65535UL) {
-            ADAPTER_LOG_WARN("invalid port env " << envName << "='" << val << "', fallback to " << def);
+        if (!ock::mf::MfEnvUtil::GetUint(envName, parsed) || parsed > 65535UL) {
+            const char *val = std::getenv(envName);
+            if (val != nullptr && val[0] != '\0') {
+                ADAPTER_LOG_WARN("invalid port env " << envName << "='" << val << "', fallback to " << def);
+            }
             return;
         }
         out = static_cast<uint16_t>(parsed);
