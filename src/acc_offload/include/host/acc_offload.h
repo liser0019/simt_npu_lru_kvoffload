@@ -92,6 +92,68 @@ void offload_free(uint64_t ptr, uint64_t flags);
  */
 int32_t offload_sparse_copy(uint64_t srcPtr, uint64_t dstPtr, uint64_t lenPtr, uint64_t sizePtr, uint16_t deviceId);
 
+/**
+ * @brief Run the LRU resident compact kernel on device.
+ *
+ * Mirrors the CPU lru_resident_compact in vllm-ascend sfa_kv_offload. All
+ * pointers must be device (NPU HBM) addresses. The per-core workspace buffers
+ * (token_mark_workspace, token_pos_workspace, epochs) must be allocated with
+ * first dim = LRU_COMPACT_BLOCK_DIM (=8), i.e. [8, max_token] and [8].
+ *
+ * @param req_ids                [in] device ptr, int64[num_reqs]
+ * @param last_req_ids           [in/out] device ptr, int64[num_reqs], persistent state
+ * @param topk_indices           [in] device ptr, int32[num_reqs * topk]
+ * @param stable_prefix_lens      [in] device ptr, int32[num_reqs]; token >= stable_prefix_lens[row] is a speculative
+ *                                  suffix that may have been overwritten in the CPU KV pool and is invalidated
+ * @param slot_to_token          [in/out] device ptr, int32[num_reqs * capacity], persistent state
+ * @param lru_slots             [in/out] device ptr, int32[num_reqs * capacity], persistent state
+ * @param current_slots          [out] device ptr, int32[num_reqs * topk]
+ * @param miss_count             [out] device ptr, int32[num_reqs]
+ * @param miss_tokens            [out] device ptr, int32[num_reqs * topk]
+ * @param miss_slots             [out] device ptr, int32[num_reqs * topk]
+ * @param token_mark_workspace   [in/out] device ptr, int32[8 * max_token], per-core workspace
+ * @param token_pos_workspace    [in/out] device ptr, int32[8 * max_token], per-core workspace
+ * @param epochs                 [in/out] device ptr, int32[8], per-core workspace
+ * @param num_reqs / topk / capacity / max_token  problem dimensions
+ * @param deviceId               [in] NPU device id
+ * @return 0 on success, non-zero error code on failure.
+ */
+int32_t offload_lru_resident_compact(uint64_t req_ids, uint64_t last_req_ids, uint64_t topk_indices,
+                                     uint64_t stable_prefix_lens, uint64_t slot_to_token, uint64_t lru_slots,
+                                     uint64_t current_slots, uint64_t miss_count, uint64_t miss_tokens,
+                                     uint64_t miss_slots, uint64_t token_mark_workspace, uint64_t token_pos_workspace,
+                                     uint64_t epochs, int64_t num_reqs, int64_t topk, int64_t capacity,
+                                     int64_t max_token, uint16_t deviceId);
+
+/**
+ * @brief Run the compute_lru_resident_addrs kernel on device.
+ *
+ * Mirrors the CPU compute_lru_resident_addrs in vllm-ascend sfa_kv_offload.
+ * Produces gvas_buffer / addr_buffer / size_buffer / num_tokens_buffer with the
+ * exact layout consumed by offload_sparse_copy (first half = K, second half = V).
+ *
+ * @param miss_count / miss_tokens / miss_slots  outputs of offload_lru_resident_compact
+ * @param block_table            [in] device ptr, int32[num_reqs * max_num_blocks]
+ * @param gvas_buffer            [out] device ptr, int64[num_reqs * topk * 2]
+ * @param addr_buffer            [out] device ptr, int64[num_reqs * topk * 2]
+ * @param size_buffer            [out] device ptr, int32[num_reqs * topk * 2]
+ * @param num_tokens_buffer      [out] device ptr, int32[1]
+ * @param block_size / token_size_bytes_k / token_size_bytes_v   token geometry (bytes)
+ * @param gvas_k_base / gvas_v_base  source (CPU offload pool) base addresses
+ * @param addr_k_base / addr_v_base  destination (NPU resident buffer) base addresses
+ * @param resident_capacity      resident buffer capacity (per req)
+ * @param num_reqs / topk / max_num_blocks  problem dimensions
+ * @param deviceId               [in] NPU device id
+ * @return 0 on success, non-zero error code on failure.
+ */
+int32_t offload_compute_lru_resident_addrs(uint64_t miss_count, uint64_t miss_tokens, uint64_t miss_slots,
+                                           uint64_t block_table, uint64_t gvas_buffer, uint64_t addr_buffer,
+                                           uint64_t size_buffer, uint64_t num_tokens_buffer, int32_t block_size,
+                                           int32_t token_size_bytes_k, int32_t token_size_bytes_v,
+                                           int64_t gvas_k_base, int64_t gvas_v_base, int64_t addr_k_base,
+                                           int64_t addr_v_base, int32_t resident_capacity, int64_t num_reqs,
+                                           int64_t topk, int64_t max_num_blocks, uint16_t deviceId);
+
 #ifdef __cplusplus
 }
 #endif

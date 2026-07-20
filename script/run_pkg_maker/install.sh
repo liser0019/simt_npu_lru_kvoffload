@@ -345,9 +345,23 @@ function try_install_extend()
 
     cd ${script_dir}/../accoffload_operators
 
-    bisheng -x asc acc_offload_sparse_copy.cpp -fPIC -shared -g -o libmf_hybm_accoffload_kernel.so ${cce_param}
+    # Compile all AscendC operator TUs (sparse_copy + lru_compact + lru_addrs)
+    # into a single kernel shared library. If bisheng cannot link multiple TUs
+    # in one step, fall back to per-TU objects then link.
+    bisheng -x asc acc_offload_sparse_copy.cpp acc_offload_lru_compact.cpp \
+        acc_offload_lru_resident_addrs.cpp -fPIC -shared -g \
+        -o libmf_hybm_accoffload_kernel.so ${cce_param}
     if [ $? -ne 0 ]; then
-        print "WARNING" "bisheng compile acc_offload_sparse_copy.cpp failed."
+        print "INFO" "bisheng multi-TU compile failed, trying per-TU objects + link."
+        bisheng -x asc acc_offload_sparse_copy.cpp -fPIC -c -g -o acc_offload_sparse_copy.o ${cce_param} && \
+        bisheng -x asc acc_offload_lru_compact.cpp -fPIC -c -g -o acc_offload_lru_compact.o ${cce_param} && \
+        bisheng -x asc acc_offload_lru_resident_addrs.cpp -fPIC -c -g -o acc_offload_lru_resident_addrs.o ${cce_param} && \
+        bisheng -shared -fPIC -g -o libmf_hybm_accoffload_kernel.so \
+            acc_offload_sparse_copy.o acc_offload_lru_compact.o acc_offload_lru_resident_addrs.o
+        rm -f acc_offload_sparse_copy.o acc_offload_lru_compact.o acc_offload_lru_resident_addrs.o
+    fi
+    if [ $? -ne 0 ]; then
+        print "WARNING" "bisheng compile accoffload kernel TUs failed."
         rm -f libmf_hybm_accoffload_kernel.so
         return
     fi
@@ -407,7 +421,8 @@ function try_install_extend()
     fi
 
     \cp libmf_hybm_accoffload.so libmf_hybm_accoffload_kernel.so ${install_dir}//${pkg_arch}-${os1}/lib64
-    rm -f libmf_hybm_accoffload.so libmf_hybm_accoffload_kernel.so acc_offload_operators_launch.o
+    rm -f libmf_hybm_accoffload.so libmf_hybm_accoffload_kernel.so acc_offload_operators_launch.o \
+        acc_offload_sparse_copy.o acc_offload_lru_compact.o acc_offload_lru_resident_addrs.o
     print "INFO" "install accoffload extend lib success"
 }
 

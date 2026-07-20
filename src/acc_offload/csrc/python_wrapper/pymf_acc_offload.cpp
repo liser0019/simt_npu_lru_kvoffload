@@ -55,6 +55,21 @@ void DefineAccOffloadApi(py::module_ &m)
 
     m.def("sparse_copy", &offload_sparse_copy, py::call_guard<py::gil_scoped_release>(),
           py::arg("srcPtrs"), py::arg("dstPtrs"), py::arg("lenPtrs"), py::arg("sizePtr"), py::arg("deviceId"));
+
+    m.def("lru_resident_compact", &offload_lru_resident_compact, py::call_guard<py::gil_scoped_release>(),
+          py::arg("req_ids"), py::arg("last_req_ids"), py::arg("topk_indices"), py::arg("stable_prefix_lens"),
+          py::arg("slot_to_token"), py::arg("lru_slots"), py::arg("current_slots"), py::arg("miss_count"),
+          py::arg("miss_tokens"), py::arg("miss_slots"), py::arg("token_mark_workspace"),
+          py::arg("token_pos_workspace"), py::arg("epochs"), py::arg("num_reqs"), py::arg("topk"),
+          py::arg("capacity"), py::arg("max_token"), py::arg("deviceId"));
+
+    m.def("compute_lru_resident_addrs", &offload_compute_lru_resident_addrs,
+          py::call_guard<py::gil_scoped_release>(), py::arg("miss_count"), py::arg("miss_tokens"),
+          py::arg("miss_slots"), py::arg("block_table"), py::arg("gvas_buffer"), py::arg("addr_buffer"),
+          py::arg("size_buffer"), py::arg("num_tokens_buffer"), py::arg("block_size"),
+          py::arg("token_size_bytes_k"), py::arg("token_size_bytes_v"), py::arg("gvas_k_base"),
+          py::arg("gvas_v_base"), py::arg("addr_k_base"), py::arg("addr_v_base"), py::arg("resident_capacity"),
+          py::arg("num_reqs"), py::arg("topk"), py::arg("max_num_blocks"), py::arg("deviceId"));
 }
 
 PYBIND11_MODULE(_pymf_acc_offload, m)

@@ -52,10 +52,12 @@ from _pymf_hybrid import (
     get_and_clear_last_err_msg
 )
 from _pymf_acc_offload import offload
-from mf_acc_offload import (empty, sparse_copy)
+from mf_acc_offload import (empty, sparse_copy, lru_resident_compact, compute_lru_resident_addrs)
 
 offload.empty = empty
 offload.sparse_copy = sparse_copy
+offload.lru_resident_compact = lru_resident_compact
+offload.compute_lru_resident_addrs = compute_lru_resident_addrs
 
 
 __all__ = [

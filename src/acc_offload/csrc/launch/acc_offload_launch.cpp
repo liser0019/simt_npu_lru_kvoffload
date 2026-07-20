@@ -22,6 +22,8 @@ void *AccOffloadLaunchApi::libHandle = nullptr;
 const char *AccOffloadLaunchApi::gAccOffloadLibName = "libmf_hybm_accoffload.so";
 
 AccOffloadSparseCopyFunc AccOffloadLaunchApi::pAccOffloadSparseCopy = nullptr;
+AccOffloadLruCompactFunc AccOffloadLaunchApi::pAccOffloadLruCompact = nullptr;
+AccOffloadComputeLruResidentAddrsFunc AccOffloadLaunchApi::pAccOffloadComputeLruResidentAddrs = nullptr;
 
 int32_t AccOffloadLaunchApi::TryLoadLibrary()
 {
@@ -54,6 +56,9 @@ int32_t AccOffloadLaunchApi::TryLoadLibrary()
     }
 
     DL_LOAD_SYM_OPTIONAL(pAccOffloadSparseCopy, AccOffloadSparseCopyFunc, libHandle, "AccOffloadSparseCopy");
+    DL_LOAD_SYM_OPTIONAL(pAccOffloadLruCompact, AccOffloadLruCompactFunc, libHandle, "AccOffloadLruCompact");
+    DL_LOAD_SYM_OPTIONAL(pAccOffloadComputeLruResidentAddrs, AccOffloadComputeLruResidentAddrsFunc, libHandle,
+                         "AccOffloadComputeLruResidentAddrs");
 
     gLoaded = true;
     return OFFLOAD_OK;
@@ -67,6 +72,8 @@ void AccOffloadLaunchApi::CleanupLibrary()
     }
 
     pAccOffloadSparseCopy = nullptr;
+    pAccOffloadLruCompact = nullptr;
+    pAccOffloadComputeLruResidentAddrs = nullptr;
 
     if (libHandle != nullptr) {
         dlclose(libHandle);
