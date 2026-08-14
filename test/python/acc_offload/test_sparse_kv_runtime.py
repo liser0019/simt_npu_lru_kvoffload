@@ -208,6 +208,7 @@ class TestSparseKvRuntimeCpuOracle(unittest.TestCase):
     def test_runtime_shape_matrix(self):
         matrix = [
             (1, 1, 1, 16), (2, 31, 47, 128),
+            (2, 33, 7, 128),
             (3, 32, 64, 4096), (4, 33, 97, 8192),
             (7, 511, 777, 32768), (8, 1024, 1537, 131072),
         ]
@@ -223,6 +224,20 @@ class TestSparseKvRuntimeCpuOracle(unittest.TestCase):
                         for slot in plan["current_slots"][row]
                         if slot >= 0
                     ))
+
+    def test_unassigned_miss_tail_remains_invalid(self):
+        case = make_case(2, 33, 7, 128)
+        plan = plan_oracle(case)
+        for row, count in enumerate(plan["miss_count"]):
+            self.assertLessEqual(count, case["capacity"])
+            self.assertEqual(
+                plan["miss_tokens"][row][count:],
+                [-1] * (case["topk"] - count),
+            )
+            self.assertEqual(
+                plan["miss_slots"][row][count:],
+                [-1] * (case["topk"] - count),
+            )
 
     def test_random_properties(self):
         rng = random.Random(20260814)

@@ -184,6 +184,9 @@ class TestSparseKvRuntimeA5(unittest.TestCase):
         matrix = [
             (1, 1, 1, 16),
             (2, 31, 47, 128),
+            # More valid misses than resident slots: verifies that only
+            # assigned misses are published and the output tail stays -1.
+            (2, 33, 7, 128),
             (3, 33, 97, 8192),
             (8, 513, 777, 32768),
         ]

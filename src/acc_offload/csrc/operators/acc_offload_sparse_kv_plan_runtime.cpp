@@ -308,7 +308,6 @@ __simt_callee__ __aicore__ inline void ProcessRuntimeRow(
         int32_t tileMissCount = control[CONTROL_TOTAL];
         if (missFlag != 0) {
             int64_t output = localMissCount + missRank;
-            missTokens[topkBase + output] = token;
             missPositions[output] = static_cast<int32_t>(position);
         }
         asc_syncthreads();
@@ -319,10 +318,14 @@ __simt_callee__ __aicore__ inline void ProcessRuntimeRow(
         localMissCount < evictableCount ? localMissCount : evictableCount;
     for (int64_t miss = thread; miss < assignCount; miss += PLAN_THREADS) {
         int32_t slot = evictableSlots[miss];
-        int32_t token = missTokens[topkBase + miss];
         int32_t position = missPositions[miss];
+        int32_t token = topkIndices[topkBase + position];
         slotToToken[capacityBase + slot] = token;
         currentSlots[topkBase + position] = slot;
+        // Only misses that actually receive a resident slot are externally
+        // visible.  The row was initialized to INVALID_TOKEN above, so the
+        // unassigned tail remains identical to the CPU oracle contract.
+        missTokens[topkBase + miss] = token;
         missSlots[topkBase + miss] = slot;
     }
     asc_syncthreads();
