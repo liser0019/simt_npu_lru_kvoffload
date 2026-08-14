@@ -139,6 +139,11 @@ bool ValidateSparseKvRuntimeParams(
         params.compact_workspace_bytes < requiredWorkspace) {
         return false;
     }
+    if (!sparse_kv_runtime_block_table_covers_tokens(
+            params.max_token, params.block_size,
+            params.max_num_blocks)) {
+        return false;
+    }
     if (params.num_reqs > INT64_MAX / params.topk ||
         params.num_reqs > INT64_MAX / params.capacity ||
         params.num_reqs > INT64_MAX / params.max_num_blocks) {

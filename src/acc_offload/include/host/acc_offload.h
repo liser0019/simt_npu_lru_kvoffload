@@ -185,6 +185,12 @@ uint64_t offload_get_sparse_kv_plan_workspace_size(
  * Both device kernels are enqueued on the current NPU stream without an
  * intermediate Host synchronization.  Registered Host K/V bases must be DVA
  * values returned by offload_get_device_address().
+ *
+ * block_size/max_num_blocks/max_token must describe a block table that covers
+ * every token ID in [0, max_token).  For each actual miss, the corresponding
+ * row-major block-table entry must be non-negative.  Transfer defensively
+ * skips an invalid entry for memory safety; such an entry is invalid upstream
+ * runtime state, not a supported semantic result.
  */
 int32_t offload_sparse_kv_load_runtime(
     const sparse_kv_load_runtime_params_t *params, uint16_t deviceId);

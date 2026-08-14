@@ -32,6 +32,7 @@ constexpr uint32_t PLAN_MAX_BLOCKS = 32;
 constexpr int32_t INVALID_TOKEN = -1;
 constexpr int32_t HASH_EMPTY = -1;
 constexpr int32_t HASH_POSITION_EMPTY = INT32_MAX;
+constexpr uint32_t HASH_BUCKET_INVALID = UINT32_MAX;
 
 constexpr uint32_t WARP_TOTALS_OFFSET = 0;
 constexpr uint32_t WARP_BASES_OFFSET =
@@ -108,13 +109,16 @@ __simt_callee__ __aicore__ inline uint32_t HashToken(
     value ^= value >> 15U;
     value *= 0x846ca68bU;
     value ^= value >> 16U;
+    // The int32 TopK-position ABI limits hashCapacity to at most 2^31.
+    // Bucket indices remain uint32 so the legal upper half of that range can
+    // never alias a negative signed sentinel.
     return value & static_cast<uint32_t>(hashCapacity - 1U);
 }
 
 // Insert returns the stable bucket selected by linear probing.  The key is
 // published with GM CAS; all colliding copies of the same TopK token then use
 // atomicMin to reproduce the CPU oracle's first-occurrence position.
-__simt_callee__ __aicore__ inline int32_t InsertTopkToken(
+__simt_callee__ __aicore__ inline uint32_t InsertTopkToken(
     __gm__ int32_t *keys, __gm__ int32_t *firstPositions,
     int32_t token, int32_t position, uint64_t hashCapacity)
 {
@@ -124,14 +128,14 @@ __simt_callee__ __aicore__ inline int32_t InsertTopkToken(
         int32_t old = asc_atomic_cas(keys + bucket, HASH_EMPTY, token);
         if (old == HASH_EMPTY || old == token) {
             asc_atomic_min(firstPositions + bucket, position);
-            return static_cast<int32_t>(bucket);
+            return bucket;
         }
         bucket = (bucket + 1U) & mask;
     }
-    return INVALID_TOKEN;
+    return HASH_BUCKET_INVALID;
 }
 
-__simt_callee__ __aicore__ inline int32_t LookupTopkToken(
+__simt_callee__ __aicore__ inline uint32_t LookupTopkToken(
     __gm__ int32_t *keys, int32_t token, uint64_t hashCapacity)
 {
     uint32_t bucket = HashToken(token, hashCapacity);
@@ -139,14 +143,14 @@ __simt_callee__ __aicore__ inline int32_t LookupTopkToken(
     for (uint64_t probe = 0; probe < hashCapacity; ++probe) {
         int32_t key = keys[bucket];
         if (key == token) {
-            return static_cast<int32_t>(bucket);
+            return bucket;
         }
         if (key == HASH_EMPTY) {
-            return INVALID_TOKEN;
+            return HASH_BUCKET_INVALID;
         }
         bucket = (bucket + 1U) & mask;
     }
-    return INVALID_TOKEN;
+    return HASH_BUCKET_INVALID;
 }
 
 __simt_callee__ __aicore__ inline void ProcessRuntimeRow(
@@ -231,7 +235,7 @@ __simt_callee__ __aicore__ inline void ProcessRuntimeRow(
         int32_t slot = INVALID_TOKEN;
         int32_t hitFlag = 0;
         int32_t evictFlag = 0;
-        int32_t bucket = INVALID_TOKEN;
+        uint32_t bucket = HASH_BUCKET_INVALID;
         if (order < capacity) {
             slot = lruSlots[capacityBase + order];
             if (slot >= 0 && static_cast<int64_t>(slot) < capacity) {
@@ -244,7 +248,7 @@ __simt_callee__ __aicore__ inline void ProcessRuntimeRow(
                 if (token >= 0 && static_cast<int64_t>(token) < maxToken) {
                     bucket = LookupTopkToken(hashKeys, token, hashCapacity);
                 }
-                if (bucket >= 0) {
+                if (bucket != HASH_BUCKET_INVALID) {
                     hitFlag = 1;
                     asc_atomic_max(hashOwner + bucket,
                                    static_cast<int32_t>(order));
@@ -283,8 +287,8 @@ __simt_callee__ __aicore__ inline void ProcessRuntimeRow(
         if (token < 0 || static_cast<int64_t>(token) >= maxToken) {
             continue;
         }
-        int32_t bucket = LookupTopkToken(hashKeys, token, hashCapacity);
-        if (bucket >= 0 && hashOwner[bucket] == order) {
+        uint32_t bucket = LookupTopkToken(hashKeys, token, hashCapacity);
+        if (bucket != HASH_BUCKET_INVALID && hashOwner[bucket] == order) {
             int32_t position = hashFirstPos[bucket];
             if (position >= 0 && static_cast<int64_t>(position) < topk) {
                 currentSlots[topkBase + position] = slot;

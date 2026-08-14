@@ -88,6 +88,12 @@ next_power_of_two(max(32, 2 * topk))
 这些操作位于同一 request block 内；阶段之间用 `asc_syncthreads()` 保证
 同 block lane 的先前 GM 操作完成并可见。这里没有跨 block 共享 hash。
 
+hash key、TopK position 和 resident owner 继续使用 `int32_t`；bucket index
+独立使用 `uint32_t`，并以 `UINT32_MAX` 表示未找到。当前 int32 position ABI
+把 `topk` 限制为 `INT32_MAX/2`，所以 hash capacity 最大为 `2^31`，可以由
+`uint32_t` 完整表示；不能把合法 bucket 强转为 `int32_t`，否则 bucket 位于
+`[2^31, UINT32_MAX)` 时会与负数 sentinel 混淆。
+
 ### 3.2 stable scan
 
 `BlockExclusiveScan1024` 使用 32 个 32-lane warp：
@@ -166,6 +172,39 @@ sparse_kv_load_runtime(...)
 
 非法 Host 参数返回错误，不分发到旧 kernel。Transfer 对 device 侧非法 miss、
 slot 或 block-table entry 做防御性跳过。
+
+### 5.1 block-table contract
+
+Host API 要求 `block_size > 0`、`max_num_blocks > 0`、`max_token > 0`，且：
+
+```text
+max_num_blocks >= ceil(max_token / block_size)
+```
+
+对于每个真正需要 H2D transfer 的 valid miss，还要求：
+
+```text
+0 <= token < max_token
+block_id = token / block_size
+block_id < max_num_blocks
+block_table[req * max_num_blocks + block_id] >= 0
+```
+
+实际 miss 对应负 block-table entry 表示 upstream/framework runtime state
+非法。Transfer 中的 `continue` 只用于避免形成非法地址，是 defensive
+memory-safety 行为，不代表该输入拥有受支持的业务结果。本轮不增加 device
+error flag，也不为读取错误状态引入同步。
+
+### 5.2 vLLM runtime staging stream contract
+
+vLLM manager 的 persistent runtime staging buffer 在 same-stream submission
+contract 下复用。metadata copy、MemFabric Plan 和 MemFabric Transfer 必须在
+同一 current NPU stream 上按顺序提交，并在 storage 再次复用前保持该顺序。
+当前热路径不增加 synchronize、event 或 per-stream staging pool。
+
+如果未来 vLLM 允许多个 NPU stream 并发提交 SparseKvLoadRuntime，必须把
+staging 改为 per-stream storage 或 double buffer，并增加显式 stream ordering；
+当前单份 persistent staging 不能被解释为支持 concurrent multi-stream reuse。
 
 ## 6. 验证状态
 

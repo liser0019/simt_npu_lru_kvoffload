@@ -98,6 +98,16 @@ def _require_npu_tensor(name, tensor, dtype, shape):
         )
 
 
+def _sparse_kv_block_table_covers_tokens(max_token, block_size,
+                                         max_num_blocks):
+    """Return whether block-table columns cover token IDs [0, max_token)."""
+    if max_token <= 0 or block_size <= 0 or max_num_blocks <= 0:
+        return False
+    required_blocks = (max_token // block_size
+                       + int(max_token % block_size != 0))
+    return max_num_blocks >= required_blocks
+
+
 def sparse_kv_load_runtime(
         req_ids, last_req_ids, topk_indices, stable_prefix_lens,
         slot_to_token, lru_slots, current_slots, miss_count, miss_tokens,
@@ -128,6 +138,16 @@ def sparse_kv_load_runtime(
         raise ValueError("topk/capacity exceed the current int32 Plan ABI")
     if max_token <= 0 or max_token > int32_max:
         raise ValueError("max_token must be representable by int32 token IDs")
+    if not _sparse_kv_block_table_covers_tokens(
+            max_token, block_size, max_num_blocks):
+        required_blocks = (max_token // block_size
+                           + int(max_token % block_size != 0)
+                           if block_size > 0 else 0)
+        raise ValueError(
+            "block_table does not cover the token domain: "
+            f"required_blocks={required_blocks}, "
+            f"max_num_blocks={max_num_blocks}"
+        )
 
     _require_npu_tensor("req_ids", req_ids, torch.int64, (num_reqs,))
     _require_npu_tensor(

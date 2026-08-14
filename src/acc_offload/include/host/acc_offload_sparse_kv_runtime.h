@@ -36,6 +36,12 @@ typedef struct sparse_kv_load_runtime_params {
     uint64_t miss_slots;
     uint64_t compact_workspace;
     uint64_t compact_workspace_bytes;
+    /*
+     * Row-major logical-to-physical block mapping.  For every valid miss,
+     * token/block_size must address this row and the selected entry must be
+     * non-negative.  A negative entry is invalid upstream runtime state; the
+     * device Transfer kernel skips it only as a memory-safety defense.
+     */
     uint64_t block_table;
     uint64_t host_k_base;
     uint64_t host_v_base;
@@ -75,6 +81,25 @@ static inline uint64_t sparse_kv_plan_hash_capacity(int64_t topk)
         capacity <<= 1U;
     }
     return capacity;
+}
+
+/*
+ * Return whether block_table has enough logical columns to cover every token
+ * in [0, max_token).  Quotient/remainder ceil-division avoids the potentially
+ * overflowing expression max_token + block_size - 1.
+ */
+static inline int sparse_kv_runtime_block_table_covers_tokens(
+    int64_t max_token, int32_t block_size, int64_t max_num_blocks)
+{
+    if (max_token <= 0 || block_size <= 0 || max_num_blocks <= 0) {
+        return 0;
+    }
+    uint64_t token_count = (uint64_t)max_token;
+    uint64_t block_size_u64 = (uint64_t)block_size;
+    uint64_t required_blocks =
+        token_count / block_size_u64 +
+        (uint64_t)((token_count % block_size_u64) != 0U);
+    return (uint64_t)max_num_blocks >= required_blocks;
 }
 
 static inline uint64_t sparse_kv_plan_workspace_row_elements(

@@ -11,8 +11,13 @@ its non-obvious duplicate rule: only the first TopK occurrence can be a hit;
 later duplicate positions remain independent misses.
 """
 
+import ast
 import copy
 import random
+import shutil
+import subprocess
+import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -310,6 +315,108 @@ class TestSparseKvRuntimeCpuOracle(unittest.TestCase):
 class TestSparseKvRuntimeSourceContract(unittest.TestCase):
     def read(self, relative):
         return (ROOT / relative).read_text(encoding="utf-8")
+
+    def test_host_hash_and_block_table_boundary_helpers(self):
+        compiler = shutil.which("c++") or shutil.which("g++")
+        if compiler is None:
+            self.skipTest("a host C++ compiler is required for header tests")
+        source = textwrap.dedent(r"""
+            #include <climits>
+            #include <cstdint>
+            #include "acc_offload_sparse_kv_runtime.h"
+
+            int main()
+            {
+                struct HashCase {
+                    int64_t topk;
+                    uint64_t expected;
+                };
+                const HashCase cases[] = {
+                    {1, 32U},
+                    {31, 64U},
+                    {32, 64U},
+                    {33, 128U},
+                    {INT64_C(1) << 29, UINT64_C(1) << 30},
+                    {INT32_MAX / 2, UINT64_C(1) << 31},
+                };
+                for (const auto &test : cases) {
+                    if (sparse_kv_plan_hash_capacity(test.topk) !=
+                        test.expected) {
+                        return 1;
+                    }
+                }
+                if (sparse_kv_plan_hash_capacity(
+                        INT64_C(1) << 30) != 0 ||
+                    sparse_kv_plan_hash_capacity(
+                        static_cast<int64_t>(INT32_MAX) / 2 + 1) != 0) {
+                    return 2;
+                }
+                if (sparse_kv_runtime_block_table_covers_tokens(1, 0, 1) ||
+                    sparse_kv_runtime_block_table_covers_tokens(1, 1, 0) ||
+                    sparse_kv_runtime_block_table_covers_tokens(0, 1, 1)) {
+                    return 3;
+                }
+                if (sparse_kv_runtime_block_table_covers_tokens(
+                        4097, 128, 32)) {
+                    return 4;
+                }
+                if (!sparse_kv_runtime_block_table_covers_tokens(
+                        4096, 128, 32) ||
+                    !sparse_kv_runtime_block_table_covers_tokens(
+                        4097, 128, 33)) {
+                    return 5;
+                }
+                return 0;
+            }
+        """)
+        include_dir = ROOT / "src/acc_offload/include/host"
+        with tempfile.TemporaryDirectory() as directory:
+            source_path = Path(directory) / "runtime_boundary_test.cpp"
+            binary_path = Path(directory) / "runtime_boundary_test"
+            source_path.write_text(source, encoding="utf-8")
+            subprocess.run(
+                [compiler, "-std=c++17", "-I", str(include_dir),
+                 str(source_path), "-o", str(binary_path)],
+                check=True,
+            )
+            subprocess.run([str(binary_path)], check=True)
+
+    def test_python_block_table_contract_helper(self):
+        source = self.read(
+            "src/smem/python/memfabric_hybrid/memfabric_hybrid/"
+            "mf_acc_offload.py"
+        )
+        module = ast.parse(source)
+        function = next(
+            node for node in module.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "_sparse_kv_block_table_covers_tokens"
+        )
+        namespace = {}
+        exec(compile(ast.Module(body=[function], type_ignores=[]),
+                     "mf_acc_offload.py", "exec"), namespace)
+        covers = namespace["_sparse_kv_block_table_covers_tokens"]
+        self.assertFalse(covers(1, 0, 1))
+        self.assertFalse(covers(1, 1, 0))
+        self.assertFalse(covers(0, 1, 1))
+        self.assertFalse(covers(4097, 128, 32))
+        self.assertTrue(covers(4096, 128, 32))
+        self.assertTrue(covers(4097, 128, 33))
+
+    def test_hash_bucket_index_is_unsigned(self):
+        source = self.read(
+            "src/acc_offload/csrc/operators/"
+            "acc_offload_sparse_kv_plan_runtime.cpp"
+        )
+        self.assertIn(
+            "constexpr uint32_t HASH_BUCKET_INVALID = UINT32_MAX", source
+        )
+        self.assertIn("inline uint32_t InsertTopkToken", source)
+        self.assertIn("inline uint32_t LookupTopkToken", source)
+        self.assertNotIn("inline int32_t InsertTopkToken", source)
+        self.assertNotIn("inline int32_t LookupTopkToken", source)
+        self.assertNotIn("static_cast<int32_t>(bucket)", source)
+        self.assertNotIn("bucket >= 0", source)
 
     def test_plan_uses_mixed_gm_hash_and_runtime_tiling(self):
         source = self.read(
