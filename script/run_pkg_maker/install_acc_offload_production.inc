@@ -5,6 +5,65 @@
 #   - ResidentAddrs Parallel V1
 #   - generic SIMT fallbacks for unsupported shapes
 
+function build_acc_offload_device_library()
+{
+    local output_library=$1
+    local kernel_kind=$2
+    shift 2
+    local kernel_sources="$*"
+    local compile_params="${cce_param}"
+    local link_params=""
+    local kernel_objects=""
+    local kernel_source
+    local kernel_object
+
+    if [ "${kernel_kind}" == "simt" ]; then
+        compile_params="${simt_compile_params}"
+        link_params="${simt_compile_params}"
+    fi
+
+    rm -f "${output_library}"
+    for kernel_source in ${kernel_sources}; do
+        kernel_object="${output_library%.so}_${kernel_source%.cpp}.o"
+        print "INFO" "building ${kernel_source} for ${output_library} with ${compile_params}"
+        if ! bisheng -x asc "${kernel_source}" -fPIC -c -g -o "${kernel_object}" \
+            ${compile_params}; then
+            rm -f ${kernel_objects} "${kernel_object}" "${output_library}"
+            return 1
+        fi
+        kernel_objects="${kernel_objects} ${kernel_object}"
+    done
+
+    if ! bisheng -shared -fPIC -g -o "${output_library}" ${kernel_objects} \
+        ${link_params}; then
+        rm -f ${kernel_objects} "${output_library}"
+        return 1
+    fi
+    rm -f ${kernel_objects}
+    return 0
+}
+
+function has_exact_device_symbol()
+{
+    local library=$1
+    local symbol=$2
+    nm -D --defined-only "${library}" 2>/dev/null |
+        awk -v expected="${symbol}" '
+            NF > 0 && $NF == expected { found = 1 }
+            END { exit(found ? 0 : 1) }
+        '
+}
+
+function require_device_symbol()
+{
+    has_exact_device_symbol "$1" "$2"
+}
+
+function reject_device_symbol()
+{
+    ! has_exact_device_symbol "$1" "$2"
+}
+
 bisheng_path=$(which bisheng 2>/dev/null)
 if [ -z "${bisheng_path}" ]; then
     print "ERROR" "bisheng Not Found; cannot build accoffload kernels."
@@ -88,10 +147,11 @@ abi_flag="-D_GLIBCXX_USE_CXX11_ABI=0"
 abi_val=$(${python_bin} -c "import torch; print(int(torch._C._GLIBCXX_USE_CXX11_ABI))" 2>/dev/null)
 if [ "${abi_val}" = "1" ]; then abi_flag="-D_GLIBCXX_USE_CXX11_ABI=1"; fi
 
-g++ -c -fPIC -std=c++17 -O3 -fstack-protector-strong \
+if ! g++ -c -fPIC -std=c++17 -O3 -fstack-protector-strong \
     -Wno-unused-parameter -Wno-unused-function -Wunused-value -Wcast-align \
     -Wcast-qual -Wwrite-strings -Wsign-compare -Wextra \
     -fvisibility-inlines-hidden -ftrapv ${abi_flag} \
+    -DMF_ACC_OFFLOAD_PRODUCTION=1 \
     -isystem ${ascend_home}/include \
     -isystem ${ascend_home}/include/experiment/runtime/runtime/ \
     -isystem ${torch_dir}/include \
@@ -104,9 +164,13 @@ g++ -c -fPIC -std=c++17 -O3 -fstack-protector-strong \
     -isystem ${torch_npu_dir}/include \
     -isystem ${torch_npu_dir}/include/torch_npu/csrc/aten \
     -isystem ${torch_npu_dir}/include/torch_npu/csrc/core/npu \
-    acc_offload_operators_launch.cpp -o acc_offload_operators_launch.o
+    acc_offload_operators_launch.cpp -o acc_offload_operators_launch.o; then
+    print "ERROR" "compile production Host launcher failed."
+    rm -f ${kernel_libraries} acc_offload_operators_launch.o
+    exit 1
+fi
 
-g++ -shared -fPIC -o libmf_hybm_accoffload.so \
+if ! g++ -shared -fPIC -o libmf_hybm_accoffload.so \
     acc_offload_operators_launch.o \
     -Wl,--no-as-needed -L. -lmf_hybm_accoffload_kernel_aiv \
     -lmf_hybm_accoffload_kernel_simt -Wl,--as-needed \
@@ -115,10 +179,20 @@ g++ -shared -fPIC -o libmf_hybm_accoffload.so \
     -L${ascend_home}/lib64 -lopapi \
     -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now \
     -Wl,-rpath,\$ORIGIN -Wl,-rpath,${torch_dir}/lib \
-    -Wl,-rpath,${torch_npu_dir}/lib -Wl,-rpath,${ascend_home}/lib64
+    -Wl,-rpath,${torch_npu_dir}/lib -Wl,-rpath,${ascend_home}/lib64; then
+    print "ERROR" "link production Host library failed."
+    rm -f ${kernel_libraries} acc_offload_operators_launch.o \
+        libmf_hybm_accoffload.so
+    exit 1
+fi
 
 accoffload_lib_dir=${install_dir}/${pkg_arch}-${os1}/lib64
-\cp libmf_hybm_accoffload.so ${kernel_libraries} "${accoffload_lib_dir}"
+if ! \cp libmf_hybm_accoffload.so ${kernel_libraries} "${accoffload_lib_dir}"; then
+    print "ERROR" "install production accoffload libraries failed."
+    rm -f ${kernel_libraries} acc_offload_operators_launch.o \
+        libmf_hybm_accoffload.so
+    exit 1
+fi
 impl_info=${accoffload_lib_dir}/acc_offload_kernel_impl.info
 cat > "${impl_info}" <<EOF
 mode=production

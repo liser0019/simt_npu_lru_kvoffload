@@ -5,19 +5,24 @@
  * PSL v2. You may obtain a copy at http://license.coscl.org.cn/MulanPSL2.
  */
 
+#ifdef MF_ACC_OFFLOAD_PRODUCTION
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#endif
 
 #include "torch_npu/csrc/core/npu/NPUGuard.h"
 #include "torch_npu/csrc/core/npu/NPUStream.h"
 #include "torch_npu/csrc/framework/OpCommand.h"
 
+#ifdef MF_ACC_OFFLOAD_PRODUCTION
 #include "acc_offload_lru_compact_fused_v3.h"
 #include "acc_offload_lru_resident_addrs_mixed_parallel.h"
+#endif
 #include "acc_offload_operators.h"
 
+#ifdef MF_ACC_OFFLOAD_PRODUCTION
 namespace {
 
 // Compact V3 is intentionally specialized for the production state shape.
@@ -94,6 +99,7 @@ void LogResidentAddrsFallbackOnce(int64_t numReqs, int64_t topk)
 }
 
 } // namespace
+#endif
 
 extern "C" {
 
@@ -127,6 +133,7 @@ void AccOffloadLruCompact(
     void *npuStream = stream.stream(false);
 
     auto callback = [=]() -> int {
+#ifdef MF_ACC_OFFLOAD_PRODUCTION
         LogProductionBackendsOnce();
         if (IsCompactV3Shape(num_reqs, topk, capacity, max_token)) {
             for (int64_t row = 0; row < num_reqs; ++row) {
@@ -146,6 +153,13 @@ void AccOffloadLruCompact(
             slot_to_token, lru_slots, current_slots, miss_count, miss_tokens,
             miss_slots, token_mark_workspace, token_pos_workspace, epochs,
             num_reqs, topk, capacity, max_token, npuStream);
+#else
+        OffloadOpsLruCompact(
+            req_ids, last_req_ids, topk_indices, stable_prefix_lens,
+            slot_to_token, lru_slots, current_slots, miss_count, miss_tokens,
+            miss_slots, token_mark_workspace, token_pos_workspace, epochs,
+            num_reqs, topk, capacity, max_token, npuStream);
+#endif
         return 0;
     };
     at_npu::native::OpCommand::RunOpApiV2(
@@ -167,6 +181,7 @@ void AccOffloadComputeLruResidentAddrs(
     void *npuStream = stream.stream(false);
 
     auto callback = [=]() -> int {
+#ifdef MF_ACC_OFFLOAD_PRODUCTION
         LogProductionBackendsOnce();
         if (IsResidentAddrsParallelShape(num_reqs, topk)) {
             OffloadOpsComputeLruResidentAddrsMixedParallel(
@@ -186,6 +201,14 @@ void AccOffloadComputeLruResidentAddrs(
             token_size_bytes_k, token_size_bytes_v, gvas_k_base,
             gvas_v_base, addr_k_base, addr_v_base, resident_capacity,
             num_reqs, topk, max_num_blocks, npuStream);
+#else
+        OffloadOpsComputeLruResidentAddrs(
+            miss_count, miss_tokens, miss_slots, block_table, gvas_buffer,
+            addr_buffer, size_buffer, num_tokens_buffer, block_size,
+            token_size_bytes_k, token_size_bytes_v, gvas_k_base,
+            gvas_v_base, addr_k_base, addr_v_base, resident_capacity,
+            num_reqs, topk, max_num_blocks, npuStream);
+#endif
         return 0;
     };
     at_npu::native::OpCommand::RunOpApiV2(
