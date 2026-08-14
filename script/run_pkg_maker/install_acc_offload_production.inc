@@ -2,7 +2,7 @@
 # It builds the one public production configuration only:
 #   - AIV/DataCopyPad SparseCopy
 #   - Compact V3 direct-GM
-#   - ResidentAddrs Parallel V1
+#   - ResidentAddrs Parallel V2 with a dedicated batch=1 fast path
 #   - generic SIMT fallbacks for unsupported shapes
 
 function build_acc_offload_device_library()
@@ -210,10 +210,13 @@ lru_compact_v3_scan=warp_prefix
 lru_compact_v3_output_path=simt_direct_gm
 compute_lru_resident_addrs=mixed_simt_parallel
 resident_addrs_fallback=simt_serial
-resident_addrs_parallel_shape=num_reqs:1,max_topk:2048
+resident_addrs_parallel_version=2
+resident_addrs_parallel_shape=num_reqs:dynamic,max_topk:2048
 resident_addrs_parallel_threads=1024
 resident_addrs_parallel_dynamic_ub_bytes=288
 resident_addrs_parallel_scan=warp_prefix
+resident_addrs_parallel_batch1_fast_path=true
+resident_addrs_parallel_row_schedule=serial_rows_parallel_misses
 EOF
 
 for artifact in libmf_hybm_accoffload.so ${kernel_libraries}; do

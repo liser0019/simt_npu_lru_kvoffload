@@ -35,12 +35,15 @@ bool IsCompactV3Shape(int64_t numReqs, int64_t topk,
            maxToken == 4096;
 }
 
-// ResidentAddrs Parallel V1 maps one request's at-most-2048 misses onto one
-// 1024-lane VF. Multi-request packing requires a different cross-row prefix,
-// so unsupported shapes continue to use the generic SIMT implementation.
+// ResidentAddrs Parallel V2 keeps the original one-row VF as its batch=1 fast
+// path and uses a two-pass multi-row VF for dynamic num_reqs.  num_tokens is an
+// int32 scalar, so also reject shapes whose maximum possible task count cannot
+// be represented without overflow.
 bool IsResidentAddrsParallelShape(int64_t numReqs, int64_t topk)
 {
-    return numReqs == 1 && topk > 0 && topk <= 2048;
+    constexpr int64_t maxTaskCount = 2147483647LL;
+    return numReqs > 0 && topk > 0 && topk <= 2048 &&
+           numReqs <= maxTaskCount / (2 * topk);
 }
 
 uint32_t GetLruV3ProfileEnabled()
@@ -61,7 +64,8 @@ void LogProductionBackendsOnce()
     }
     std::fprintf(stderr,
         "[ACC_OFFLOAD_PRODUCTION] "
-        "compact=mixed_ub_fused_v3 resident_addrs=mixed_simt_parallel "
+        "compact=mixed_ub_fused_v3 "
+        "resident_addrs=mixed_simt_parallel "
         "sparse_copy=aiv_datacopypad\n");
     std::fflush(stderr);
 }
@@ -92,7 +96,8 @@ void LogResidentAddrsFallbackOnce(int64_t numReqs, int64_t topk)
     }
     std::fprintf(stderr,
         "[RESIDENT_ADDRS_FALLBACK] mixed_simt_parallel requires "
-        "num_reqs=1 and 0<topk<=2048; using generic SIMT: "
+        "num_reqs>0, 0<topk<=2048 and int32-safe task count; "
+        "using generic SIMT: "
         "num_reqs=%lld topk=%lld\n",
         static_cast<long long>(numReqs), static_cast<long long>(topk));
     std::fflush(stderr);

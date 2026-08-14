@@ -2,7 +2,7 @@
  * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
  * MemFabric_Hybrid is licensed under Mulan PSL v2.
  *
- * Parallel V1 for ComputeLruResidentAddrs on the production num_reqs=1 path.
+ * Parallel V2 for ComputeLruResidentAddrs on A5.
  *
  * The legacy pure-SIMT kernel maps one lane to one request.  With the real
  * num_reqs=1 workload that leaves lane 0 serially processing as many as 2048
@@ -16,9 +16,14 @@
  * We cannot publish V immediately after the first tile because the ABI is
  * [all K][all V] and the V base is the final valid count across both tiles.
  *
+ * The original single-row VF is kept as a separate fast path.  Multi-row uses
+ * two passes in one 1024-lane VF: pass 1 counts all valid items so the global V
+ * base is known; pass 2 repeats validation, computes stable row-local ranks and
+ * publishes request-major descriptors.  Requests are serial, misses within a
+ * request remain parallel.  This avoids cross-block prefix/workspace changes.
+ *
  * Only 288 bytes of dynamic UB are used for warp totals/bases and control.
- * Descriptor input/output stays direct GM in this V1 so the experiment isolates
- * task mapping, duplicate-scan removal and warp-prefix compaction.
+ * Descriptor input/output and block-table lookup stay direct GM in V2.
  */
 
 #include <cstdint>
@@ -36,6 +41,7 @@ constexpr uint32_t RESIDENT_ADDRS_WARP_SIZE = 32;
 constexpr uint32_t RESIDENT_ADDRS_WARP_COUNT =
     RESIDENT_ADDRS_THREADS / RESIDENT_ADDRS_WARP_SIZE;
 constexpr uint32_t RESIDENT_ADDRS_MAX_TOPK = 2048;
+constexpr int64_t RESIDENT_ADDRS_MAX_TASK_COUNT = 2147483647LL;
 
 // The two scans are sequential and therefore reuse the same 32-entry arrays.
 // Keep the control tail eight-int (32-byte) aligned for explicit dynamic UB.
@@ -59,7 +65,9 @@ static_assert(RESIDENT_ADDRS_DYNAMIC_UB_BYTES == 288U,
 static_assert(RESIDENT_ADDRS_DYNAMIC_UB_BYTES % 32U == 0U,
               "dynamic UB must remain 32-byte aligned");
 
-// Work-efficient 1024-lane stable exclusive scan for one 0/1 predicate.
+// Work-efficient 1024-lane stable exclusive scan for a non-negative value.
+// Publication calls pass a 0/1 predicate; MultiRow pass 1 deliberately passes
+// valid0+valid1 (0..2) and uses only the resulting block total as a reduction.
 // Five shuffle stages scan each 32-lane warp.  Lane 31 publishes the warp
 // total; warp 0 scans those 32 totals; every lane then adds its warp base.
 // All lanes execute all three block barriers, including inactive input lanes.
@@ -138,7 +146,7 @@ __simt_callee__ __aicore__ inline void PublishResidentAddressItem(
 }
 
 __simt_vf__ __aicore__ LAUNCH_BOUND(RESIDENT_ADDRS_THREADS) inline void
-ResidentAddrsParallelVf(
+ResidentAddrsParallelSingleRowVf(
     __ubuf__ int32_t *workspace, __gm__ int32_t *missCount,
     __gm__ int32_t *missTokens, __gm__ int32_t *missSlots,
     __gm__ int32_t *blockTable, __gm__ int64_t *gvasBuffer,
@@ -259,6 +267,218 @@ ResidentAddrsParallelVf(
     }
 }
 
+// Multi-row publication uses the same [all K][all V] descriptor ABI as the
+// single-row path.  globalRank already includes the stable prefix of all prior
+// requests.  The destination slot must additionally include the request stride;
+// omitting it would make different requests overwrite the same resident row.
+__simt_callee__ __aicore__ inline void PublishResidentAddressItemMultiRow(
+    int64_t globalRank, int64_t totalValid, int64_t req, int32_t slot,
+    int32_t blockIndex, int32_t offsetInBlock, int64_t blockBytesK,
+    int64_t blockBytesV, __gm__ int64_t *gvasBuffer,
+    __gm__ int64_t *addrBuffer, __gm__ int32_t *sizeBuffer,
+    int32_t tokenSizeBytesK, int32_t tokenSizeBytesV, int64_t gvasKBase,
+    int64_t gvasVBase, int64_t addrKBase, int64_t addrVBase,
+    int32_t residentCapacity)
+{
+    int64_t kPos = globalRank;
+    int64_t vPos = totalValid + globalRank;
+    int64_t itemOffset = static_cast<int64_t>(offsetInBlock);
+    int64_t linearSlot = req * static_cast<int64_t>(residentCapacity) + slot;
+
+    gvasBuffer[kPos] =
+        gvasKBase + static_cast<int64_t>(blockIndex) * blockBytesK +
+        itemOffset * tokenSizeBytesK;
+    gvasBuffer[vPos] =
+        gvasVBase + static_cast<int64_t>(blockIndex) * blockBytesV +
+        itemOffset * tokenSizeBytesV;
+    addrBuffer[kPos] = addrKBase + linearSlot * tokenSizeBytesK;
+    addrBuffer[vPos] = addrVBase + linearSlot * tokenSizeBytesV;
+    sizeBuffer[kPos] = tokenSizeBytesK;
+    sizeBuffer[vPos] = tokenSizeBytesV;
+}
+
+// Multi-row V2 deliberately serializes requests inside one VF while retaining
+// 1024-lane miss parallelism inside every request.  Two passes are necessary:
+// the V half starts at totalValid, which cannot be known while the first row is
+// being inspected because later rows may contain invalid descriptors.
+__simt_vf__ __aicore__ LAUNCH_BOUND(RESIDENT_ADDRS_THREADS) inline void
+ResidentAddrsParallelMultiRowVf(
+    __ubuf__ int32_t *workspace, __gm__ int32_t *missCount,
+    __gm__ int32_t *missTokens, __gm__ int32_t *missSlots,
+    __gm__ int32_t *blockTable, __gm__ int64_t *gvasBuffer,
+    __gm__ int64_t *addrBuffer, __gm__ int32_t *sizeBuffer,
+    __gm__ int32_t *numTokensBuffer, int32_t blockSize,
+    int32_t tokenSizeBytesK, int32_t tokenSizeBytesV, int64_t gvasKBase,
+    int64_t gvasVBase, int64_t addrKBase, int64_t addrVBase,
+    int32_t residentCapacity, int64_t numReqs, int64_t topk,
+    int64_t maxNumBlocks)
+{
+    uint32_t thread = static_cast<uint32_t>(threadIdx.x);
+    __ubuf__ int32_t *control = workspace + CONTROL_OFFSET;
+    uint32_t index0 = thread;
+    uint32_t index1 = thread + RESIDENT_ADDRS_THREADS;
+
+    // Pass 1: validate every row and reduce valid0+valid1.  No per-item
+    // metadata survives the scan, keeping this counting pass register-light.
+    int64_t totalValid = 0;
+    for (int64_t req = 0; req < numReqs; ++req) {
+        if (thread == 0U) {
+            int32_t count = 0;
+            if (blockSize > 0 && residentCapacity > 0 && maxNumBlocks > 0) {
+                count = missCount[req];
+                if (count < 0) {
+                    count = 0;
+                } else if (count > topk) {
+                    count = static_cast<int32_t>(topk);
+                }
+            }
+            control[CONTROL_COUNT] = count;
+        }
+        asc_syncthreads();
+        int32_t count = control[CONTROL_COUNT];
+        int64_t rowInputBase = req * topk;
+        int64_t rowBlockBase = req * maxNumBlocks;
+        int32_t validPair = 0;
+
+        if (index0 < static_cast<uint32_t>(count)) {
+            int64_t input = rowInputBase + index0;
+            int32_t token = missTokens[input];
+            int32_t slot = missSlots[input];
+            if (token >= 0 && slot >= 0 && slot < residentCapacity) {
+                int32_t blockId = token / blockSize;
+                if (static_cast<int64_t>(blockId) < maxNumBlocks &&
+                    blockTable[rowBlockBase + blockId] >= 0) {
+                    ++validPair;
+                }
+            }
+        }
+        if (index1 < static_cast<uint32_t>(count)) {
+            int64_t input = rowInputBase + index1;
+            int32_t token = missTokens[input];
+            int32_t slot = missSlots[input];
+            if (token >= 0 && slot >= 0 && slot < residentCapacity) {
+                int32_t blockId = token / blockSize;
+                if (static_cast<int64_t>(blockId) < maxNumBlocks &&
+                    blockTable[rowBlockBase + blockId] >= 0) {
+                    ++validPair;
+                }
+            }
+        }
+
+        (void)WarpExclusiveScan1024(workspace, validPair, thread);
+        totalValid += control[CONTROL_TOTAL];
+    }
+
+    if (thread == 0U) {
+        // The Host/exported-symbol gate guarantees this conversion is safe.
+        *numTokensBuffer = static_cast<int32_t>(totalValid * 2);
+    }
+    asc_syncthreads();
+
+    const int64_t blockBytesK =
+        static_cast<int64_t>(blockSize) * tokenSizeBytesK;
+    const int64_t blockBytesV =
+        static_cast<int64_t>(blockSize) * tokenSizeBytesV;
+    int64_t rowBase = 0;
+
+    // Pass 2: repeat validation so both totalValid and the final V base are
+    // known, then generate stable row-local ranks and publish global positions.
+    for (int64_t req = 0; req < numReqs; ++req) {
+        if (thread == 0U) {
+            int32_t count = 0;
+            if (blockSize > 0 && residentCapacity > 0 && maxNumBlocks > 0) {
+                count = missCount[req];
+                if (count < 0) {
+                    count = 0;
+                } else if (count > topk) {
+                    count = static_cast<int32_t>(topk);
+                }
+            }
+            control[CONTROL_COUNT] = count;
+        }
+        asc_syncthreads();
+        int32_t count = control[CONTROL_COUNT];
+        int64_t rowInputBase = req * topk;
+        int64_t rowBlockBase = req * maxNumBlocks;
+
+        int32_t valid0 = 0;
+        int32_t slot0 = 0;
+        int32_t blockIndex0 = 0;
+        int32_t offsetInBlock0 = 0;
+        if (index0 < static_cast<uint32_t>(count)) {
+            int64_t input = rowInputBase + index0;
+            const int32_t token = missTokens[input];
+            const int32_t candidateSlot = missSlots[input];
+            if (token >= 0 && candidateSlot >= 0 &&
+                candidateSlot < residentCapacity) {
+                const int32_t blockId = token / blockSize;
+                if (static_cast<int64_t>(blockId) < maxNumBlocks) {
+                    const int32_t candidateBlock =
+                        blockTable[rowBlockBase + blockId];
+                    if (candidateBlock >= 0) {
+                        valid0 = 1;
+                        slot0 = candidateSlot;
+                        blockIndex0 = candidateBlock;
+                        offsetInBlock0 = token % blockSize;
+                    }
+                }
+            }
+        }
+
+        int32_t valid1 = 0;
+        int32_t slot1 = 0;
+        int32_t blockIndex1 = 0;
+        int32_t offsetInBlock1 = 0;
+        if (index1 < static_cast<uint32_t>(count)) {
+            int64_t input = rowInputBase + index1;
+            const int32_t token = missTokens[input];
+            const int32_t candidateSlot = missSlots[input];
+            if (token >= 0 && candidateSlot >= 0 &&
+                candidateSlot < residentCapacity) {
+                const int32_t blockId = token / blockSize;
+                if (static_cast<int64_t>(blockId) < maxNumBlocks) {
+                    const int32_t candidateBlock =
+                        blockTable[rowBlockBase + blockId];
+                    if (candidateBlock >= 0) {
+                        valid1 = 1;
+                        slot1 = candidateSlot;
+                        blockIndex1 = candidateBlock;
+                        offsetInBlock1 = token % blockSize;
+                    }
+                }
+            }
+        }
+
+        int32_t rank0 = WarpExclusiveScan1024(workspace, valid0, thread);
+        int32_t total0 = control[CONTROL_TOTAL];
+        int32_t rank1Local =
+            WarpExclusiveScan1024(workspace, valid1, thread);
+        int32_t rowValid = total0 + control[CONTROL_TOTAL];
+
+        if (valid0 != 0) {
+            PublishResidentAddressItemMultiRow(
+                rowBase + rank0, totalValid, req, slot0, blockIndex0,
+                offsetInBlock0, blockBytesK, blockBytesV, gvasBuffer,
+                addrBuffer, sizeBuffer, tokenSizeBytesK, tokenSizeBytesV,
+                gvasKBase, gvasVBase, addrKBase, addrVBase,
+                residentCapacity);
+        }
+        if (valid1 != 0) {
+            PublishResidentAddressItemMultiRow(
+                rowBase + total0 + rank1Local, totalValid, req, slot1,
+                blockIndex1, offsetInBlock1, blockBytesK, blockBytesV,
+                gvasBuffer, addrBuffer, sizeBuffer, tokenSizeBytesK,
+                tokenSizeBytesV, gvasKBase, gvasVBase, addrKBase, addrVBase,
+                residentCapacity);
+        }
+
+        // Re-converge after lane-local direct-GM stores before the next row
+        // reuses control/scan scratch.  Every lane updates the same rowBase.
+        asc_syncthreads();
+        rowBase += rowValid;
+    }
+}
+
 } // namespace
 
 extern "C" __global__ __vector__ void
@@ -268,22 +488,39 @@ OffloadComputeLruResidentAddrsMixedParallelKernel(
     GM_ADDR sizeBuffer, GM_ADDR numTokensBuffer, int32_t blockSize,
     int32_t tokenSizeBytesK, int32_t tokenSizeBytesV, int64_t gvasKBase,
     int64_t gvasVBase, int64_t addrKBase, int64_t addrVBase,
-    int32_t residentCapacity, int64_t topk, int64_t maxNumBlocks)
+    int32_t residentCapacity, int64_t numReqs, int64_t topk,
+    int64_t maxNumBlocks)
 {
     AscendC::InitSocState();
     extern __ubuf__ int32_t workspace[];
-    asc_vf_call<ResidentAddrsParallelVf>(
-        dim3(RESIDENT_ADDRS_THREADS), workspace,
-        reinterpret_cast<__gm__ int32_t *>(missCount),
-        reinterpret_cast<__gm__ int32_t *>(missTokens),
-        reinterpret_cast<__gm__ int32_t *>(missSlots),
-        reinterpret_cast<__gm__ int32_t *>(blockTable),
-        reinterpret_cast<__gm__ int64_t *>(gvasBuffer),
-        reinterpret_cast<__gm__ int64_t *>(addrBuffer),
-        reinterpret_cast<__gm__ int32_t *>(sizeBuffer),
-        reinterpret_cast<__gm__ int32_t *>(numTokensBuffer), blockSize,
-        tokenSizeBytesK, tokenSizeBytesV, gvasKBase, gvasVBase, addrKBase,
-        addrVBase, residentCapacity, topk, maxNumBlocks);
+    if (numReqs == 1) {
+        asc_vf_call<ResidentAddrsParallelSingleRowVf>(
+            dim3(RESIDENT_ADDRS_THREADS), workspace,
+            reinterpret_cast<__gm__ int32_t *>(missCount),
+            reinterpret_cast<__gm__ int32_t *>(missTokens),
+            reinterpret_cast<__gm__ int32_t *>(missSlots),
+            reinterpret_cast<__gm__ int32_t *>(blockTable),
+            reinterpret_cast<__gm__ int64_t *>(gvasBuffer),
+            reinterpret_cast<__gm__ int64_t *>(addrBuffer),
+            reinterpret_cast<__gm__ int32_t *>(sizeBuffer),
+            reinterpret_cast<__gm__ int32_t *>(numTokensBuffer), blockSize,
+            tokenSizeBytesK, tokenSizeBytesV, gvasKBase, gvasVBase,
+            addrKBase, addrVBase, residentCapacity, topk, maxNumBlocks);
+    } else {
+        asc_vf_call<ResidentAddrsParallelMultiRowVf>(
+            dim3(RESIDENT_ADDRS_THREADS), workspace,
+            reinterpret_cast<__gm__ int32_t *>(missCount),
+            reinterpret_cast<__gm__ int32_t *>(missTokens),
+            reinterpret_cast<__gm__ int32_t *>(missSlots),
+            reinterpret_cast<__gm__ int32_t *>(blockTable),
+            reinterpret_cast<__gm__ int64_t *>(gvasBuffer),
+            reinterpret_cast<__gm__ int64_t *>(addrBuffer),
+            reinterpret_cast<__gm__ int32_t *>(sizeBuffer),
+            reinterpret_cast<__gm__ int32_t *>(numTokensBuffer), blockSize,
+            tokenSizeBytesK, tokenSizeBytesV, gvasKBase, gvasVBase,
+            addrKBase, addrVBase, residentCapacity, numReqs, topk,
+            maxNumBlocks);
+    }
 }
 
 extern "C" void OffloadOpsComputeLruResidentAddrsMixedParallel(
@@ -297,7 +534,8 @@ extern "C" void OffloadOpsComputeLruResidentAddrsMixedParallel(
 {
     // Host dispatch shape-gates this backend. Keep a defensive guard because
     // this internal symbol can still be inspected or called independently.
-    if (num_reqs != 1 || topk <= 0 || topk > RESIDENT_ADDRS_MAX_TOPK) {
+    if (num_reqs <= 0 || topk <= 0 || topk > RESIDENT_ADDRS_MAX_TOPK ||
+        num_reqs > RESIDENT_ADDRS_MAX_TASK_COUNT / (2 * topk)) {
         return;
     }
     OffloadComputeLruResidentAddrsMixedParallelKernel<<<
@@ -311,5 +549,6 @@ extern "C" void OffloadOpsComputeLruResidentAddrsMixedParallel(
         reinterpret_cast<GM_ADDR>(size_buffer),
         reinterpret_cast<GM_ADDR>(num_tokens_buffer), block_size,
         token_size_bytes_k, token_size_bytes_v, gvas_k_base, gvas_v_base,
-        addr_k_base, addr_v_base, resident_capacity, topk, max_num_blocks);
+        addr_k_base, addr_v_base, resident_capacity, num_reqs, topk,
+        max_num_blocks);
 }

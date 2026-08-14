@@ -2,8 +2,9 @@
  * Copyright (c) Huawei Technologies Co., Ltd. 2026-2026. All rights reserved.
  * MemFabric_Hybrid is licensed under Mulan PSL v2.
  *
- * Internal launch interface for the experimental production-shape
- * ComputeLruResidentAddrs mixed SIMD/SIMT backend.
+ * Internal launch interface for the production ComputeLruResidentAddrs mixed
+ * SIMD/SIMT backend.  V2 supports runtime multi-request packing while keeping
+ * the original single-request VF as a dedicated fast path.
  */
 
 #ifndef ACC_OFFLOAD_LRU_RESIDENT_ADDRS_MIXED_PARALLEL_H
