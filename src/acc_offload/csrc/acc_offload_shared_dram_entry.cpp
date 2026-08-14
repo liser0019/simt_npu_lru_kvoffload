@@ -29,6 +29,20 @@ static uint64_t AlignUp(uint64_t value, uint64_t align) noexcept
     return (value + align - 1) & ~(align - 1);
 }
 
+static bool RangeInPool(const uint8_t *base, uint64_t poolSize, const void *ptr, size_t size) noexcept
+{
+    if (base == nullptr || ptr == nullptr || size == 0U) {
+        return false;
+    }
+    auto baseAddress = reinterpret_cast<uint64_t>(base);
+    auto address = reinterpret_cast<uint64_t>(ptr);
+    if (address < baseAddress) {
+        return false;
+    }
+    auto offset = address - baseAddress;
+    return offset <= poolSize && size <= poolSize - offset;
+}
+
 int32_t AccOffloadSharedDramEntry::Initialize(const offload_config_t &config)
 {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -37,6 +51,11 @@ int32_t AccOffloadSharedDramEntry::Initialize(const offload_config_t &config)
     }
 
     OFFLOAD_ASSERT_RETURN(config.worldSize != 0, OFFLOAD_ERROR);
+    if (config.registerHostMemory != 0U && config.worldSize != 1U) {
+        OFFLOAD_LOG_ERROR("registered Host pool currently supports only worldSize=1, worldSize: "
+                          << config.worldSize);
+        return OFFLOAD_ERROR;
+    }
     int32_t ret = OFFLOAD_OK;
     do {
         ret = hybm_init(config.deviceId, 0);
@@ -100,6 +119,10 @@ int32_t AccOffloadSharedDramEntry::Initialize(const offload_config_t &config)
         option.localHBMSize = 0;
         option.dataOpType = SMEMB_DATA_OP_MTE;
         option.flags = SMEM_BM_FLAG_DRAM_MAP_HOST_VA;
+        registerHostMemory_ = config.registerHostMemory != 0U;
+        if (registerHostMemory_) {
+            option.flags |= SMEM_BM_FLAG_HOST_REGISTER_FOR_DEVICE;
+        }
         option.dramShmFd = -1;
         option.enable56BitsGva = false;
 
@@ -166,6 +189,7 @@ void AccOffloadSharedDramEntry::UnInitalize()
 
     base_ = nullptr;
     size_ = 0;
+    registerHostMemory_ = false;
     inited_ = false;
 }
 
@@ -189,6 +213,24 @@ void AccOffloadSharedDramEntry::FreeHost(void *ptr)
 
     OFFLOAD_LOG_DEBUG("shared free host ptr: " << reinterpret_cast<uint64_t>(ptr));
     memMng_->Release(ptr);
+}
+
+uint64_t AccOffloadSharedDramEntry::GetDeviceAddress(const void *ptr, size_t size)
+{
+    if (!registerHostMemory_ || !RangeInPool(base_, size_, ptr, size)) {
+        OFFLOAD_LOG_ERROR("host address is not in a device-registered shared pool, ptr: "
+                          << reinterpret_cast<uint64_t>(ptr) << ", size: " << size);
+        return 0U;
+    }
+
+    uint64_t deviceAddress = 0U;
+    auto ret = hybm_gva_to_va(reinterpret_cast<uint64_t>(ptr), HYBM_MEM_TYPE_DEVICE, &deviceAddress);
+    if (ret != OFFLOAD_OK || deviceAddress == 0U) {
+        OFFLOAD_LOG_ERROR("convert shared host GVA to DVA failed, ptr: " << reinterpret_cast<uint64_t>(ptr)
+                          << ", size: " << size << ", ret: " << ret);
+        return 0U;
+    }
+    return deviceAddress;
 }
 
 int32_t AccOffloadSharedDramEntry::SparseCopy(uint64_t *srcPtrs, uint64_t *dstPtrs, uint32_t *lenPtrs,

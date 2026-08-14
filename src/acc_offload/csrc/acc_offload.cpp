@@ -43,6 +43,11 @@ OFFLOAD_API void offload_free(uint64_t ptr, uint64_t flags)
     AccOffloadEntryManager::Instance().FreeHost(reinterpret_cast<void *>(ptr));
 }
 
+OFFLOAD_API uint64_t offload_get_device_address(uint64_t ptr, uint64_t size)
+{
+    return AccOffloadEntryManager::Instance().GetDeviceAddress(reinterpret_cast<void *>(ptr), size);
+}
+
 OFFLOAD_API int32_t offload_sparse_copy(uint64_t srcPtr, uint64_t dstPtr, uint64_t lenPtr, uint64_t sizePtr,
                                         uint16_t deviceId)
 {

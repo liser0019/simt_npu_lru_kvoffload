@@ -99,6 +99,15 @@ void AccOffloadEntryManager::FreeHost(void *ptr)
     entry_->FreeHost(ptr);
 }
 
+uint64_t AccOffloadEntryManager::GetDeviceAddress(const void *ptr, size_t size)
+{
+    if (entry_ == nullptr || ptr == nullptr || size == 0U) {
+        OFFLOAD_LOG_ERROR("entry or ptr is null, or size is zero, resolve device address failed");
+        return 0U;
+    }
+    return entry_->GetDeviceAddress(ptr, size);
+}
+
 int32_t AccOffloadEntryManager::SparseCopy(uint64_t *srcPtrs, uint64_t *dstPtrs, uint32_t *lenPtrs,
                                            uint32_t *sizePtr, uint8_t devIdx)
 {

@@ -40,7 +40,9 @@ void DefineAccOffloadConfig(py::module_ &m)
         .def_readwrite("rank_id", &offload_config_t::rankId,
                        "local rank id, 0 is the server (multi-card shared mode)")
         .def_readwrite("scene", &offload_config_t::scene,
-                       "memory pool scene: LOCAL=single-card, SHARED=multi-card shared");
+                       "memory pool scene: LOCAL=single-card, SHARED=multi-card shared")
+        .def_readwrite("register_host_memory", &offload_config_t::registerHostMemory,
+                       "register the local host pool and retain a device-visible address");
 }
 
 void DefineAccOffloadApi(py::module_ &m)
@@ -52,6 +54,9 @@ void DefineAccOffloadApi(py::module_ &m)
     m.def("malloc", &offload_malloc, py::call_guard<py::gil_scoped_release>(), py::arg("size"), py::arg("flags") = 0);
 
     m.def("free", &offload_free, py::call_guard<py::gil_scoped_release>(), py::arg("ptr"), py::arg("flags") = 0);
+
+    m.def("get_device_address", &offload_get_device_address, py::call_guard<py::gil_scoped_release>(),
+          py::arg("ptr"), py::arg("size"));
 
     m.def("sparse_copy", &offload_sparse_copy, py::call_guard<py::gil_scoped_release>(),
           py::arg("srcPtrs"), py::arg("dstPtrs"), py::arg("lenPtrs"), py::arg("sizePtr"), py::arg("deviceId"));

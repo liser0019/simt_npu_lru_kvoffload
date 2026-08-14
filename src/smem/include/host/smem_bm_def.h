@@ -33,6 +33,8 @@ typedef void *smem_bm_t;
 #define SMEM_BM_FLAG_CREATE_WITH_SHM         (1U << 8)
 // SMEM_BM_FLAG_DRAM_MAP_HOST_VA map host virtual address space
 #define SMEM_BM_FLAG_DRAM_MAP_HOST_VA (1U << 9)
+// Register locally allocated host DRAM and retain its device-visible VA.
+#define SMEM_BM_FLAG_HOST_REGISTER_FOR_DEVICE (1U << 10)
 
 /**
 * @brief Smem memory type

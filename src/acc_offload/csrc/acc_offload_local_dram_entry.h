@@ -42,6 +42,8 @@ public:
 
     void FreeHost(void *ptr) override;
 
+    uint64_t GetDeviceAddress(const void *ptr, size_t size) override;
+
     int32_t SparseCopy(uint64_t *srcPtrs, uint64_t *dstPtrs, uint32_t *lenPtrs, uint32_t *sizePtr,
                        uint8_t devIdx) override;
 
@@ -63,6 +65,7 @@ public:
 private:
     std::mutex mutex_;
     bool inited_ = false;
+    bool registerHostMemory_ = false;
     hybm_entity_t entity_ = nullptr;
     hybm_mem_slice_t slice_ = nullptr;
     uint8_t *base_ = nullptr;

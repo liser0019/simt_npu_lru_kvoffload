@@ -32,6 +32,7 @@ typedef struct {
     uint32_t worldSize;                       /* number of ranks in the group (used in SHARED scene) */
     uint32_t rankId;                          /* local rank id, 0 is the allocator (used in SHARED scene) */
     offload_scene_t scene;                    /* LOCAL: single-card pool; SHARED: multi-card shared pool */
+    uint8_t registerHostMemory;               /* register local host pool and retain its device-visible VA */
 } offload_config_t;
 
 /**
@@ -75,6 +76,19 @@ uint64_t offload_malloc(uint64_t size, uint64_t flags);
  * @param flags [in] optional flags
  */
 void offload_free(uint64_t ptr, uint64_t flags);
+
+/**
+ * @brief Resolve a host-pool GVA returned by offload_malloc to the local device-visible address.
+ *
+ * The requested byte range must be contained in the local offload pool and the pool must have
+ * been initialized with registerHostMemory enabled. The returned address is suitable for use in
+ * AI Core sparse-copy descriptors on the device that initialized the pool.
+ *
+ * @param ptr   [in] Host-pool address returned by offload_malloc, including an optional byte offset.
+ * @param size  [in] Number of bytes that must remain within the registered allocation.
+ * @return Non-zero local device-visible address on success, 0 on failure.
+ */
+uint64_t offload_get_device_address(uint64_t ptr, uint64_t size);
 
 /**
  * @brief Batch copy sparse data from host to device or from device to host.

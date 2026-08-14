@@ -63,6 +63,7 @@ public:
     }
 
 private:
+    bool NeedHostRegisterForDevice() const noexcept;
     void FreeMemory() noexcept;
     Result PrepareShareMemoryFd() const noexcept;
     Result MapSlice(void *&mapped, void *sliceAddr, uint64_t lvOffset, uint64_t size, uint64_t gva,

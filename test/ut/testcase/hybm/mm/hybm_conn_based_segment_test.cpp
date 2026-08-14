@@ -27,8 +27,27 @@
 
 #include "hybm_ex_info_transfer.h"
 #include "hybm_va_manager.h"
+#include "dl_hal_api.h"
 
 using namespace ock::mf;
+
+namespace {
+void *g_registeredHost = nullptr;
+void *g_registeredDevice = nullptr;
+uint32_t g_hostRegisterCalls = 0U;
+
+int RegisterHostForDeviceStub(void *addr, uint64_t size, uint32_t flags, uint32_t devId, void **output)
+{
+    (void)size;
+    (void)flags;
+    (void)devId;
+    ++g_hostRegisterCalls;
+    g_registeredHost = addr;
+    g_registeredDevice = reinterpret_cast<void *>(reinterpret_cast<uint64_t>(addr) + 0x100000000ULL);
+    *output = g_registeredDevice;
+    return BM_OK;
+}
+} // namespace
 
 class HybmConnBasedSegmentTest : public testing::Test {
 protected:
@@ -63,6 +82,9 @@ protected:
     {
         GlobalMockObject::reset();
         HybmVaManager::GetInstance().ClearAll();
+        g_registeredHost = nullptr;
+        g_registeredDevice = nullptr;
+        g_hostRegisterCalls = 0U;
     }
 
     void TearDown() override
@@ -164,6 +186,33 @@ TEST_F(HybmConnBasedSegmentTest, AllocLocalMemory_MapsOneSliceAndTracksVa)
 
     MemSlicePtr invalidSlice;
     EXPECT_EQ(segment.AllocLocalMemory(HYBM_LARGE_PAGE_SIZE / 2UL, invalidSlice), BM_INVALID_PARAM);
+
+    segment.FreeMemory();
+}
+
+/**
+ * AllocLocalMemory_DeviceRegistrationFlagTracksDva
+ *  - 验证显式设备注册 flag 会注册本地 Host Pool，并在 VA 管理器中保留返回的 DVA。
+ */
+TEST_F(HybmConnBasedSegmentTest, AllocLocalMemory_DeviceRegistrationFlagTracksDva)
+{
+    auto options = MakeOptions(1U, 0U);
+    options.dataOpType = HYBM_DOP_TYPE_MTE;
+    options.flags = HYBM_FLAG_DRAM_MAP_HOST_VA | HYBM_FLAG_HOST_REGISTER_FOR_DEVICE;
+    MOCKER(&DlHalApi::HalHostRegister).stubs().will(invoke(RegisterHostForDeviceStub));
+    MOCKER(&DlHalApi::HalHostUnregisterEx).stubs().will(returnValue(BM_OK));
+
+    HybmConnBasedSegment segment(options, 0);
+    void *address = nullptr;
+    ASSERT_EQ(segment.ReserveMemorySpace(&address), BM_OK);
+
+    MemSlicePtr slice;
+    ASSERT_EQ(segment.AllocLocalMemory(HYBM_LARGE_PAGE_SIZE, slice), BM_OK);
+    ASSERT_EQ(g_hostRegisterCalls, 1U);
+    ASSERT_EQ(g_registeredHost, reinterpret_cast<void *>(slice->vAddress_));
+
+    auto converted = HybmVaManager::GetInstance().TransformVa(slice->gva_, HVM_GVA, HVM_DVA);
+    EXPECT_EQ(converted, reinterpret_cast<uint64_t>(g_registeredDevice));
 
     segment.FreeMemory();
 }

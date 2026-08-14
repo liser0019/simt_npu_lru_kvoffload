@@ -27,6 +27,20 @@ static uint64_t AlignUp(uint64_t value, uint64_t align) noexcept
     return (value + align - 1) & ~(align - 1);
 }
 
+static bool RangeInPool(const uint8_t *base, uint64_t poolSize, const void *ptr, size_t size) noexcept
+{
+    if (base == nullptr || ptr == nullptr || size == 0U) {
+        return false;
+    }
+    auto baseAddress = reinterpret_cast<uint64_t>(base);
+    auto address = reinterpret_cast<uint64_t>(ptr);
+    if (address < baseAddress) {
+        return false;
+    }
+    auto offset = address - baseAddress;
+    return offset <= poolSize && size <= poolSize - offset;
+}
+
 int32_t AccOffloadLocalDramEntry::Initialize(const offload_config_t &config)
 {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -62,6 +76,10 @@ int32_t AccOffloadLocalDramEntry::Initialize(const offload_config_t &config)
     options.hostVASpace = alignedAllocSize;
     options.scene = HYBM_SCENE_DEFAULT;
     options.flags = HYBM_FLAG_DRAM_MAP_HOST_VA;
+    registerHostMemory_ = config.registerHostMemory != 0U;
+    if (registerHostMemory_) {
+        options.flags |= HYBM_FLAG_HOST_REGISTER_FOR_DEVICE;
+    }
     options.dramShmFd = -1;
 
     do {
@@ -134,6 +152,7 @@ void AccOffloadLocalDramEntry::UnInitalize()
 
     hybm_uninit();
     entity_ = nullptr;
+    registerHostMemory_ = false;
     inited_ = false;
 }
 
@@ -157,6 +176,24 @@ void AccOffloadLocalDramEntry::FreeHost(void *ptr)
 
     OFFLOAD_LOG_DEBUG("free host ptr: " << reinterpret_cast<uint64_t>(ptr));
     memMng_->Release(ptr);
+}
+
+uint64_t AccOffloadLocalDramEntry::GetDeviceAddress(const void *ptr, size_t size)
+{
+    if (!registerHostMemory_ || !RangeInPool(base_, size_, ptr, size)) {
+        OFFLOAD_LOG_ERROR("host address is not in a device-registered local pool, ptr: "
+                          << reinterpret_cast<uint64_t>(ptr) << ", size: " << size);
+        return 0U;
+    }
+
+    uint64_t deviceAddress = 0U;
+    auto ret = hybm_gva_to_va(reinterpret_cast<uint64_t>(ptr), HYBM_MEM_TYPE_DEVICE, &deviceAddress);
+    if (ret != OFFLOAD_OK || deviceAddress == 0U) {
+        OFFLOAD_LOG_ERROR("convert local host GVA to DVA failed, ptr: " << reinterpret_cast<uint64_t>(ptr)
+                          << ", size: " << size << ", ret: " << ret);
+        return 0U;
+    }
+    return deviceAddress;
 }
 
 int32_t AccOffloadLocalDramEntry::SparseCopy(uint64_t *srcPtrs, uint64_t *dstPtrs, uint32_t *lenPtrs, uint32_t *sizePtr,

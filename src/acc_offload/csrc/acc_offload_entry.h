@@ -39,6 +39,8 @@ public:
 
     virtual void FreeHost(void *ptr) = 0;
 
+    virtual uint64_t GetDeviceAddress(const void *ptr, size_t size) = 0;
+
     virtual int32_t SparseCopy(uint64_t *srcPtrs, uint64_t *dstPtrs, uint32_t *lenPtrs, uint32_t *sizePtr,
                                uint8_t devIdx) = 0;
 

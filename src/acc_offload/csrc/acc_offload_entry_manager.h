@@ -48,6 +48,8 @@ public:
 
     void FreeHost(void *ptr);
 
+    uint64_t GetDeviceAddress(const void *ptr, size_t size);
+
     int32_t SparseCopy(uint64_t *srcPtrs, uint64_t *dstPtrs, uint32_t *lenPtrs, uint32_t *sizePtr, uint8_t devIdx);
 
     int32_t LruResidentCompact(uint64_t req_ids, uint64_t last_req_ids, uint64_t topk_indices,

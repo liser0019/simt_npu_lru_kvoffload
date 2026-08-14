@@ -14,6 +14,7 @@ import ctypes
 import torch
 from _pymf_acc_offload import offload
 
+get_device_address_impl = offload.get_device_address
 sparse_copy_impl = offload.sparse_copy
 lru_resident_compact_impl = offload.lru_resident_compact
 compute_lru_resident_addrs_impl = offload.compute_lru_resident_addrs
@@ -32,6 +33,22 @@ def empty(sizes, dtype=None, pin_memory=False):
         raise Exception("malloc failed")
     buf = (ctypes.c_int8 * element_size).from_address(ptr)
     return torch.frombuffer(buf, dtype=dtype).reshape(sizes)
+
+
+def get_device_address(tensor):
+    if tensor.device.type != "cpu":
+        raise ValueError(f"offload host-pool tensor must be on CPU, got {tensor.device}")
+    if not tensor.is_contiguous():
+        raise ValueError("offload host-pool tensor must be contiguous")
+    size_bytes = tensor.numel() * tensor.element_size()
+    if size_bytes <= 0:
+        raise ValueError("offload host-pool tensor must not be empty")
+    address = get_device_address_impl(tensor.data_ptr(), size_bytes)
+    if address == 0:
+        raise RuntimeError(
+            "MemFabric host-pool address is not registered for device access"
+        )
+    return address
 
 
 def sparse_copy(srcPtrs, dstPtrs, lenPtrs, sizePtr, deviceId):

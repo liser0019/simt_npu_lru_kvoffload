@@ -76,9 +76,21 @@ cp "${OUTPUT_DIR}"/smem/lib64/* ${PKG_DIR}/"${ARCH_OS}"/lib64
 cp -r "${OUTPUT_DIR}"/hybm/include/* ${PKG_DIR}/include/hybm/
 cp "${OUTPUT_DIR}"/hybm/lib64/libmf_hybm_core.so ${PKG_DIR}/"${ARCH_OS}"/lib64/
 cp -r "${PROJECT_DIR}"/src/hybm/csrc/copy_extend ${PKG_DIR}
-# accoffload extend source (AscendC kernel + torch_npu adapter), compiled at install time
+# accoffload production sources, compiled at install time.  Use an explicit
+# allow-list so the run package cannot accidentally pick up baseline AIV files
+# or future research kernels merely because they live in operators/.
 mkdir -p ${PKG_DIR}/accoffload_operators
-cp "${PROJECT_DIR}"/src/acc_offload/csrc/operators/* ${PKG_DIR}/accoffload_operators/
+cp \
+    "${PROJECT_DIR}"/src/acc_offload/csrc/operators/acc_offload_operators.h \
+    "${PROJECT_DIR}"/src/acc_offload/csrc/operators/acc_offload_sparse_copy.cpp \
+    "${PROJECT_DIR}"/src/acc_offload/csrc/operators/acc_offload_sparse_copy.h \
+    "${PROJECT_DIR}"/src/acc_offload/csrc/operators/acc_offload_lru_compact_fused_v3.cpp \
+    "${PROJECT_DIR}"/src/acc_offload/csrc/operators/acc_offload_lru_compact_fused_v3.h \
+    "${PROJECT_DIR}"/src/acc_offload/csrc/operators/acc_offload_lru_compact_simt.cpp \
+    "${PROJECT_DIR}"/src/acc_offload/csrc/operators/acc_offload_lru_resident_addrs_mixed_parallel.cpp \
+    "${PROJECT_DIR}"/src/acc_offload/csrc/operators/acc_offload_lru_resident_addrs_mixed_parallel.h \
+    "${PROJECT_DIR}"/src/acc_offload/csrc/operators/acc_offload_lru_resident_addrs_simt.cpp \
+    ${PKG_DIR}/accoffload_operators/
 cp "${PROJECT_DIR}"/src/acc_offload/csrc/launch/acc_offload_operators_launch.cpp ${PKG_DIR}/accoffload_operators/
 
 # memfabric_hybrid wheel package
@@ -97,6 +109,7 @@ fi
 mkdir -p ${PKG_DIR}/script
 echo "in make_run.sh, XPU_TYPE is $XPU_TYPE"
 cp "${BASH_PATH}"/install.sh ${PKG_DIR}/script/
+cp "${BASH_PATH}"/install_acc_offload_production.inc ${PKG_DIR}/script/
 sed -i "s/<<XPU_TYPE>>/${XPU_TYPE}/g" ${PKG_DIR}/script/install.sh
 cp "${BASH_PATH}"/uninstall.sh ${PKG_DIR}/script/
 

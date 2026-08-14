@@ -35,6 +35,8 @@ typedef void *hybm_mem_slice_t;
 #define HYBM_FLAG_CREATE_WITH_SHM            (1U << 8)
 // HYBM_FLAG_DRAM_MAP_HOST_VA map host virtual address space
 #define HYBM_FLAG_DRAM_MAP_HOST_VA           (1U << 9)
+// Register locally allocated host DRAM and retain its device-visible VA.
+#define HYBM_FLAG_HOST_REGISTER_FOR_DEVICE   (1U << 10)
 #define HYBM_FLAG_INIT_SHMEM_META            (1ULL << 63)
 
 #define HYBM_PRE_REG_SIZE_THRES (8192U * 1024) // local buffer larger than 8MB maybe preregister to mr

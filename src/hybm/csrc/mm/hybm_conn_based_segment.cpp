@@ -40,6 +40,12 @@ Result HybmConnBasedSegment::ValidateOptions() noexcept
     return BM_OK;
 }
 
+bool HybmConnBasedSegment::NeedHostRegisterForDevice() const noexcept
+{
+    return (options_.dataOpType & HYBM_DOP_TYPE_DEVICE_RDMA) != 0U ||
+           (options_.flags & HYBM_FLAG_HOST_REGISTER_FOR_DEVICE) != 0U;
+}
+
 Result HybmConnBasedSegment::ReserveMemorySpace(void **address) noexcept
 {
     BM_ASSERT_LOG_AND_RETURN(ValidateOptions() == BM_OK, "Failed to validate options.", BM_INVALID_PARAM);
@@ -345,19 +351,23 @@ Result HybmConnBasedSegment::MapSlice(void *&mapped, void *sliceAddr, uint64_t l
         return BM_ERROR;
     }
 
-    if (options_.dataOpType & HYBM_DOP_TYPE_DEVICE_RDMA) {
+    if (NeedHostRegisterForDevice()) {
         auto ret = DlHalApi::HalHostRegister(mapped, size, HOST_MEM_MAP_DEV, logicDeviceId_, &dva);
-        if (ret != BM_OK) {
-            BM_LOG_ERROR("register host va failed, ret:" << ret);
+        if (ret != BM_OK || dva == nullptr) {
+            BM_LOG_ERROR("register host va failed, ret:" << ret << " host:" << mapped << " size:" << size
+                                                           << " device:" << logicDeviceId_ << " dva:" << dva);
             FreeAllocatedMemory(mapped, size, allocMethod);
             return BM_ERROR;
         }
+        BM_LOG_INFO("registered host pool for device access, host:" << mapped << " dva:" << dva
+                                                                    << " size:" << size
+                                                                    << " device:" << logicDeviceId_);
     }
     int ret = HybmVaManager::GetInstance().AddVaInfo(
         {gva, (uint64_t)dva, (uint64_t)mapped, size, HYBM_MEM_TYPE_HOST}, options_.rankId);
     if (ret != 0) {
         BM_LOG_ERROR("AddVaInfo failed, size: " << size << " ret: " << ret);
-        if (options_.dataOpType & HYBM_DOP_TYPE_DEVICE_RDMA) {
+        if (NeedHostRegisterForDevice()) {
             DlHalApi::HalHostUnregisterEx(mapped, logicDeviceId_, HOST_MEM_MAP_DEV);
         }
         FreeAllocatedMemory(mapped, size, allocMethod);
@@ -479,7 +489,10 @@ Result HybmConnBasedSegment::ReleaseSliceMemory(const MemSlicePtr &slice) noexce
     slices_.erase(pos);
 
 #if defined(ASCEND_NPU)
-    const bool needUnregister = (options_.dataOpType & HYBM_DOP_TYPE_DEVICE_RDMA) != 0U;
+    const bool isPoolHostSlice = slice->memType_ == HYBM_MEM_TYPE_HOST && slice->gva_ != 0U;
+    const bool needUnregister = (options_.dataOpType & HYBM_DOP_TYPE_DEVICE_RDMA) != 0U ||
+                                (isPoolHostSlice &&
+                                 (options_.flags & HYBM_FLAG_HOST_REGISTER_FOR_DEVICE) != 0U);
     if (needUnregister) {
         auto unregRet = DlHalApi::HalHostUnregisterEx(reinterpret_cast<void *>(slice->vAddress_),
                                                       logicDeviceId_, HOST_MEM_MAP_DEV);
