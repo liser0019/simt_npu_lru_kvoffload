@@ -1,5 +1,7 @@
 # This file is sourced by install.sh inside try_install_extend().
-# It builds the one public production configuration only:
+# It builds the A5 production configuration:
+#   - descriptor-free SparseKvLoadRuntime (Plan + Transfer)
+#   - legacy three-operator path retained only for A/B and rollback
 #   - AIV/DataCopyPad SparseCopy
 #   - Compact V3 direct-GM
 #   - ResidentAddrs Parallel V2 with a dedicated batch=1 fast path
@@ -109,7 +111,9 @@ rm -f ${kernel_libraries} acc_offload_operators_launch.o \
 
 if ! build_acc_offload_device_library "${aiv_kernel_library}" aiv \
     acc_offload_sparse_copy.cpp acc_offload_lru_compact_fused_v3.cpp \
-    acc_offload_lru_resident_addrs_mixed_parallel.cpp; then
+    acc_offload_lru_resident_addrs_mixed_parallel.cpp \
+    acc_offload_sparse_kv_plan_runtime.cpp \
+    acc_offload_sparse_kv_transfer_runtime.cpp; then
     print "ERROR" "build production AIV/mixed kernel library failed."
     exit 1
 fi
@@ -124,6 +128,8 @@ fi
 if ! require_device_symbol "${aiv_kernel_library}" OffloadOpsSparseCopy ||
    ! require_device_symbol "${aiv_kernel_library}" OffloadOpsLruCompactFusedV3 ||
    ! require_device_symbol "${aiv_kernel_library}" OffloadOpsComputeLruResidentAddrsMixedParallel ||
+   ! require_device_symbol "${aiv_kernel_library}" OffloadOpsSparseKvPlanRuntime ||
+   ! require_device_symbol "${aiv_kernel_library}" OffloadOpsSparseKvTransferRuntime ||
    ! reject_device_symbol "${aiv_kernel_library}" OffloadOpsLruCompact ||
    ! reject_device_symbol "${aiv_kernel_library}" OffloadOpsComputeLruResidentAddrs ||
    ! require_device_symbol "${simt_kernel_library}" OffloadOpsLruCompact ||
@@ -217,6 +223,19 @@ resident_addrs_parallel_dynamic_ub_bytes=288
 resident_addrs_parallel_scan=warp_prefix
 resident_addrs_parallel_batch1_fast_path=true
 resident_addrs_parallel_row_schedule=serial_rows_parallel_misses
+sparse_kv_load_runtime=plan_plus_transfer
+sparse_kv_plan=mixed_simt_runtime_hash
+sparse_kv_plan_shape=num_reqs:runtime,topk:runtime,capacity:runtime,max_token:validation_only
+sparse_kv_plan_threads=1024
+sparse_kv_plan_dynamic_ub_bytes=288
+sparse_kv_plan_workspace=O(num_reqs*(topk+capacity))
+sparse_kv_plan_max_token_workspace=false
+sparse_kv_plan_hash=gm_open_addressed_cas
+sparse_kv_plan_row_schedule=max_32_blocks_block_stride
+sparse_kv_transfer=aiv_datacopypad
+sparse_kv_transfer_blocks=32
+sparse_kv_transfer_descriptor_materialization=false
+sparse_kv_load_runtime_sync=one_stream_no_intermediate_sync
 EOF
 
 for artifact in libmf_hybm_accoffload.so ${kernel_libraries}; do

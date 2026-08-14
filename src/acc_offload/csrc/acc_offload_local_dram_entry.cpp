@@ -245,5 +245,16 @@ int32_t AccOffloadLocalDramEntry::ComputeLruResidentAddrs(uint64_t miss_count, u
         resident_capacity, num_reqs, topk, max_num_blocks, devIdx);
 }
 
+int32_t AccOffloadLocalDramEntry::SparseKvLoadRuntime(
+    const sparse_kv_load_runtime_params_t &params, uint8_t devIdx)
+{
+    OFFLOAD_LOG_DEBUG("sparse kv load runtime, num_reqs: " << params.num_reqs
+                      << ", topk: " << params.topk
+                      << ", capacity: " << params.capacity
+                      << ", max_token: " << params.max_token
+                      << ", devIdx: " << devIdx);
+    return AccOffloadLaunchApi::AccOffloadSparseKvLoadRuntime(params, devIdx);
+}
+
 } // namespace offload
 } // namespace ock

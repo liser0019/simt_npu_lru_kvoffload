@@ -19,7 +19,10 @@
 #ifdef MF_ACC_OFFLOAD_PRODUCTION
 #include "acc_offload_lru_compact_fused_v3.h"
 #include "acc_offload_lru_resident_addrs_mixed_parallel.h"
+#include "acc_offload_sparse_kv_plan_runtime.h"
+#include "acc_offload_sparse_kv_transfer_runtime.h"
 #endif
+#include "acc_offload_sparse_kv_runtime.h"
 #include "acc_offload_operators.h"
 
 #ifdef MF_ACC_OFFLOAD_PRODUCTION
@@ -67,6 +70,19 @@ void LogProductionBackendsOnce()
         "compact=mixed_ub_fused_v3 "
         "resident_addrs=mixed_simt_parallel "
         "sparse_copy=aiv_datacopypad\n");
+    std::fflush(stderr);
+}
+
+void LogSparseKvRuntimeOnce()
+{
+    static std::atomic<bool> logged{false};
+    bool expected = false;
+    if (!logged.compare_exchange_strong(expected, true)) {
+        return;
+    }
+    std::fprintf(stderr,
+        "[SPARSE_KV_LOAD_RUNTIME] api=one plan=mixed_simt_hash "
+        "transfer=aiv_datacopypad descriptors=none\n");
     std::fflush(stderr);
 }
 
@@ -219,5 +235,45 @@ void AccOffloadComputeLruResidentAddrs(
     at_npu::native::OpCommand::RunOpApiV2(
         "acc_offload_compute_lru_resident_addrs", callback);
 }
+
+#ifdef MF_ACC_OFFLOAD_PRODUCTION
+void AccOffloadSparseKvLoadRuntime(
+    const sparse_kv_load_runtime_params_t *params, uint8_t devIdx)
+{
+    if (params == nullptr) {
+        return;
+    }
+    sparse_kv_load_runtime_params_t value = *params;
+    c10_npu::OptionalNPUGuard npuGuard;
+    npuGuard.set_index(devIdx);
+    auto stream = c10_npu::getCurrentNPUStream(devIdx);
+    void *npuStream = stream.stream(false);
+
+    // RunOpApiV2 executes the callback while this stack frame is alive, but
+    // capture a POD copy rather than the caller's pointer to make ownership
+    // explicit.  The two launches share npuStream and intentionally contain no
+    // synchronize: stream ordering is the Plan -> Transfer dependency.
+    auto callback = [value, npuStream]() -> int {
+        LogSparseKvRuntimeOnce();
+        OffloadOpsSparseKvPlanRuntime(
+            value.req_ids, value.last_req_ids, value.topk_indices,
+            value.stable_prefix_lens, value.slot_to_token, value.lru_slots,
+            value.current_slots, value.miss_count, value.miss_tokens,
+            value.miss_slots, value.compact_workspace,
+            value.compact_workspace_bytes, value.num_reqs, value.topk,
+            value.capacity, value.max_token, npuStream);
+        OffloadOpsSparseKvTransferRuntime(
+            value.miss_count, value.miss_tokens, value.miss_slots,
+            value.block_table, value.host_k_base, value.host_v_base,
+            value.device_k_base, value.device_v_base, value.num_reqs,
+            value.topk, value.capacity, value.max_num_blocks,
+            value.block_size, value.token_size_bytes_k,
+            value.token_size_bytes_v, npuStream);
+        return 0;
+    };
+    at_npu::native::OpCommand::RunOpApiV2(
+        "acc_offload_sparse_kv_load_runtime", callback);
+}
+#endif // MF_ACC_OFFLOAD_PRODUCTION
 
 } // extern "C"

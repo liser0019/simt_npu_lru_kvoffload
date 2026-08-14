@@ -53,13 +53,17 @@ from _pymf_hybrid import (
 )
 from _pymf_acc_offload import offload
 from mf_acc_offload import (empty, get_device_address, sparse_copy, lru_resident_compact,
-                            compute_lru_resident_addrs)
+                            compute_lru_resident_addrs,
+                            get_sparse_kv_plan_workspace_size,
+                            sparse_kv_load_runtime)
 
 offload.empty = empty
 offload.get_device_address = get_device_address
 offload.sparse_copy = sparse_copy
 offload.lru_resident_compact = lru_resident_compact
 offload.compute_lru_resident_addrs = compute_lru_resident_addrs
+offload.get_sparse_kv_plan_workspace_size = get_sparse_kv_plan_workspace_size
+offload.sparse_kv_load_runtime = sparse_kv_load_runtime
 
 
 __all__ = [

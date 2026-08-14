@@ -84,6 +84,10 @@ cp \
     "${PROJECT_DIR}"/src/acc_offload/csrc/operators/acc_offload_operators.h \
     "${PROJECT_DIR}"/src/acc_offload/csrc/operators/acc_offload_sparse_copy.cpp \
     "${PROJECT_DIR}"/src/acc_offload/csrc/operators/acc_offload_sparse_copy.h \
+    "${PROJECT_DIR}"/src/acc_offload/csrc/operators/acc_offload_sparse_kv_plan_runtime.cpp \
+    "${PROJECT_DIR}"/src/acc_offload/csrc/operators/acc_offload_sparse_kv_plan_runtime.h \
+    "${PROJECT_DIR}"/src/acc_offload/csrc/operators/acc_offload_sparse_kv_transfer_runtime.cpp \
+    "${PROJECT_DIR}"/src/acc_offload/csrc/operators/acc_offload_sparse_kv_transfer_runtime.h \
     "${PROJECT_DIR}"/src/acc_offload/csrc/operators/acc_offload_lru_compact.cpp \
     "${PROJECT_DIR}"/src/acc_offload/csrc/operators/acc_offload_lru_compact.h \
     "${PROJECT_DIR}"/src/acc_offload/csrc/operators/acc_offload_lru_compact_fused_v3.cpp \
@@ -94,6 +98,8 @@ cp \
     "${PROJECT_DIR}"/src/acc_offload/csrc/operators/acc_offload_lru_resident_addrs_mixed_parallel.cpp \
     "${PROJECT_DIR}"/src/acc_offload/csrc/operators/acc_offload_lru_resident_addrs_mixed_parallel.h \
     "${PROJECT_DIR}"/src/acc_offload/csrc/operators/acc_offload_lru_resident_addrs_simt.cpp \
+    ${PKG_DIR}/accoffload_operators/
+cp "${PROJECT_DIR}"/src/acc_offload/include/host/acc_offload_sparse_kv_runtime.h \
     ${PKG_DIR}/accoffload_operators/
 cp "${PROJECT_DIR}"/src/acc_offload/csrc/launch/acc_offload_operators_launch.cpp ${PKG_DIR}/accoffload_operators/
 

@@ -75,6 +75,66 @@ void DefineAccOffloadApi(py::module_ &m)
           py::arg("token_size_bytes_k"), py::arg("token_size_bytes_v"), py::arg("gvas_k_base"),
           py::arg("gvas_v_base"), py::arg("addr_k_base"), py::arg("addr_v_base"), py::arg("resident_capacity"),
           py::arg("num_reqs"), py::arg("topk"), py::arg("max_num_blocks"), py::arg("deviceId"));
+
+    m.def("get_sparse_kv_plan_workspace_size",
+          &offload_get_sparse_kv_plan_workspace_size,
+          py::arg("num_reqs"), py::arg("topk"), py::arg("capacity"));
+
+    m.def("sparse_kv_load_runtime",
+          [](uint64_t req_ids, uint64_t last_req_ids,
+             uint64_t topk_indices, uint64_t stable_prefix_lens,
+             uint64_t slot_to_token, uint64_t lru_slots,
+             uint64_t current_slots, uint64_t miss_count,
+             uint64_t miss_tokens, uint64_t miss_slots,
+             uint64_t compact_workspace,
+             uint64_t compact_workspace_bytes, uint64_t block_table,
+             uint64_t host_k_base, uint64_t host_v_base,
+             uint64_t device_k_base, uint64_t device_v_base,
+             int64_t num_reqs, int64_t topk, int64_t capacity,
+             int64_t max_token, int64_t max_num_blocks,
+             int32_t block_size, int32_t token_size_bytes_k,
+             int32_t token_size_bytes_v, uint16_t deviceId) {
+              sparse_kv_load_runtime_params_t params{};
+              params.req_ids = req_ids;
+              params.last_req_ids = last_req_ids;
+              params.topk_indices = topk_indices;
+              params.stable_prefix_lens = stable_prefix_lens;
+              params.slot_to_token = slot_to_token;
+              params.lru_slots = lru_slots;
+              params.current_slots = current_slots;
+              params.miss_count = miss_count;
+              params.miss_tokens = miss_tokens;
+              params.miss_slots = miss_slots;
+              params.compact_workspace = compact_workspace;
+              params.compact_workspace_bytes = compact_workspace_bytes;
+              params.block_table = block_table;
+              params.host_k_base = host_k_base;
+              params.host_v_base = host_v_base;
+              params.device_k_base = device_k_base;
+              params.device_v_base = device_v_base;
+              params.num_reqs = num_reqs;
+              params.topk = topk;
+              params.capacity = capacity;
+              params.max_token = max_token;
+              params.max_num_blocks = max_num_blocks;
+              params.block_size = block_size;
+              params.token_size_bytes_k = token_size_bytes_k;
+              params.token_size_bytes_v = token_size_bytes_v;
+              return offload_sparse_kv_load_runtime(&params, deviceId);
+          }, py::call_guard<py::gil_scoped_release>(),
+          py::arg("req_ids"), py::arg("last_req_ids"),
+          py::arg("topk_indices"), py::arg("stable_prefix_lens"),
+          py::arg("slot_to_token"), py::arg("lru_slots"),
+          py::arg("current_slots"), py::arg("miss_count"),
+          py::arg("miss_tokens"), py::arg("miss_slots"),
+          py::arg("compact_workspace"),
+          py::arg("compact_workspace_bytes"), py::arg("block_table"),
+          py::arg("host_k_base"), py::arg("host_v_base"),
+          py::arg("device_k_base"), py::arg("device_v_base"),
+          py::arg("num_reqs"), py::arg("topk"), py::arg("capacity"),
+          py::arg("max_token"), py::arg("max_num_blocks"),
+          py::arg("block_size"), py::arg("token_size_bytes_k"),
+          py::arg("token_size_bytes_v"), py::arg("deviceId"));
 }
 
 PYBIND11_MODULE(_pymf_acc_offload, m)

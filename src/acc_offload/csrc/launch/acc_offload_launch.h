@@ -14,6 +14,7 @@
 
 #include <mutex>
 #include "acc_offload_define.h"
+#include "acc_offload_sparse_kv_runtime.h"
 
 namespace ock {
 namespace offload {
@@ -27,6 +28,9 @@ using AccOffloadLruCompactFunc = void (*)(uint64_t, uint64_t, uint64_t, uint64_t
 using AccOffloadComputeLruResidentAddrsFunc = void (*)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t,
                                                        uint64_t, uint64_t, int32_t, int32_t, int32_t, int64_t, int64_t,
                                                        int64_t, int64_t, int32_t, int64_t, int64_t, int64_t, uint8_t);
+
+using AccOffloadSparseKvLoadRuntimeFunc = void (*)(
+    const sparse_kv_load_runtime_params_t *, uint8_t);
 
 class AccOffloadLaunchApi {
 public:
@@ -79,6 +83,16 @@ public:
         return OFFLOAD_OK;
     }
 
+    static inline int32_t AccOffloadSparseKvLoadRuntime(
+        const sparse_kv_load_runtime_params_t &params, uint8_t devIdx)
+    {
+        if (pAccOffloadSparseKvLoadRuntime == nullptr) {
+            return OFFLOAD_UNLOAD;
+        }
+        pAccOffloadSparseKvLoadRuntime(&params, devIdx);
+        return OFFLOAD_OK;
+    }
+
 private:
     static std::mutex gMutex;
     static bool gLoaded;
@@ -88,6 +102,7 @@ private:
     static AccOffloadSparseCopyFunc pAccOffloadSparseCopy;
     static AccOffloadLruCompactFunc pAccOffloadLruCompact;
     static AccOffloadComputeLruResidentAddrsFunc pAccOffloadComputeLruResidentAddrs;
+    static AccOffloadSparseKvLoadRuntimeFunc pAccOffloadSparseKvLoadRuntime;
 };
 
 } // namespace offload

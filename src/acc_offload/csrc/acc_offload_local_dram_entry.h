@@ -62,6 +62,10 @@ public:
                                     int32_t resident_capacity, int64_t num_reqs, int64_t topk, int64_t max_num_blocks,
                                     uint8_t devIdx) override;
 
+    int32_t SparseKvLoadRuntime(
+        const sparse_kv_load_runtime_params_t &params,
+        uint8_t devIdx) override;
+
 private:
     std::mutex mutex_;
     bool inited_ = false;

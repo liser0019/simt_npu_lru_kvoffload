@@ -13,6 +13,7 @@
 #define __MEMFABRIC_ACC_OFFLOAD_H__
 
 #include <stdint.h>
+#include "acc_offload_sparse_kv_runtime.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -167,6 +168,26 @@ int32_t offload_compute_lru_resident_addrs(uint64_t miss_count, uint64_t miss_to
                                            int64_t gvas_k_base, int64_t gvas_v_base, int64_t addr_k_base,
                                            int64_t addr_v_base, int32_t resident_capacity, int64_t num_reqs,
                                            int64_t topk, int64_t max_num_blocks, uint16_t deviceId);
+
+/**
+ * @brief Return the GM workspace bytes required by SparseKvPlanRuntime.
+ *
+ * The result depends only on num_reqs/topk/capacity. max_token is deliberately
+ * absent because the runtime architecture does not allocate a dense token map.
+ * Returns zero for invalid or overflowing dimensions.
+ */
+uint64_t offload_get_sparse_kv_plan_workspace_size(
+    int64_t num_reqs, int64_t topk, int64_t capacity);
+
+/**
+ * @brief Submit descriptor-free Sparse KV load as Plan + Transfer.
+ *
+ * Both device kernels are enqueued on the current NPU stream without an
+ * intermediate Host synchronization.  Registered Host K/V bases must be DVA
+ * values returned by offload_get_device_address().
+ */
+int32_t offload_sparse_kv_load_runtime(
+    const sparse_kv_load_runtime_params_t *params, uint16_t deviceId);
 
 #ifdef __cplusplus
 }

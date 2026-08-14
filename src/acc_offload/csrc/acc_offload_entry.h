@@ -58,6 +58,9 @@ public:
                                             int64_t gvas_k_base, int64_t gvas_v_base, int64_t addr_k_base,
                                             int64_t addr_v_base, int32_t resident_capacity, int64_t num_reqs,
                                             int64_t topk, int64_t max_num_blocks, uint8_t devIdx) = 0;
+
+    virtual int32_t SparseKvLoadRuntime(
+        const sparse_kv_load_runtime_params_t &params, uint8_t devIdx) = 0;
 };
 
 } // namespace offload

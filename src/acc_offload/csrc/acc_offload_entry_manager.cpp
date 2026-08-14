@@ -156,5 +156,15 @@ int32_t AccOffloadEntryManager::ComputeLruResidentAddrs(uint64_t miss_count, uin
                                            resident_capacity, num_reqs, topk, max_num_blocks, devIdx);
 }
 
+int32_t AccOffloadEntryManager::SparseKvLoadRuntime(
+    const sparse_kv_load_runtime_params_t &params, uint8_t devIdx)
+{
+    if (entry_ == nullptr) {
+        OFFLOAD_LOG_ERROR("entry is null, sparse kv load runtime failed");
+        return OFFLOAD_ERROR;
+    }
+    return entry_->SparseKvLoadRuntime(params, devIdx);
+}
+
 } // namespace offload
 } // namespace ock

@@ -13,6 +13,8 @@
 #include "acc_offload_entry_manager.h"
 #include "acc_offload_define.h"
 
+#include <climits>
+
 using namespace ock::offload;
 
 OFFLOAD_API int32_t offload_init(const offload_config_t &config)
@@ -88,4 +90,112 @@ OFFLOAD_API int32_t offload_compute_lru_resident_addrs(uint64_t miss_count, uint
         miss_count, miss_tokens, miss_slots, block_table, gvas_buffer, addr_buffer, size_buffer, num_tokens_buffer,
         block_size, token_size_bytes_k, token_size_bytes_v, gvas_k_base, gvas_v_base, addr_k_base, addr_v_base,
         resident_capacity, num_reqs, topk, max_num_blocks, static_cast<uint8_t>(deviceId));
+}
+
+OFFLOAD_API uint64_t offload_get_sparse_kv_plan_workspace_size(
+    int64_t num_reqs, int64_t topk, int64_t capacity)
+{
+    return sparse_kv_plan_workspace_size_bytes(num_reqs, topk, capacity);
+}
+
+namespace {
+bool CheckedMultiply(uint64_t lhs, uint64_t rhs, uint64_t &result)
+{
+    if (lhs != 0 && rhs > UINT64_MAX / lhs) {
+        return false;
+    }
+    result = lhs * rhs;
+    return true;
+}
+
+bool AddressRangeFits(uint64_t base, uint64_t bytes)
+{
+    return bytes > 0 && base <= UINT64_MAX - (bytes - 1U);
+}
+
+bool ValidateSparseKvRuntimeParams(
+    const sparse_kv_load_runtime_params_t &params)
+{
+    const uint64_t requiredWorkspace =
+        sparse_kv_plan_workspace_size_bytes(
+            params.num_reqs, params.topk, params.capacity);
+    const bool pointersValid =
+        params.req_ids != 0 && params.last_req_ids != 0 &&
+        params.topk_indices != 0 && params.stable_prefix_lens != 0 &&
+        params.slot_to_token != 0 && params.lru_slots != 0 &&
+        params.current_slots != 0 && params.miss_count != 0 &&
+        params.miss_tokens != 0 && params.miss_slots != 0 &&
+        params.compact_workspace != 0 && params.block_table != 0 &&
+        params.host_k_base != 0 && params.host_v_base != 0 &&
+        params.device_k_base != 0 && params.device_v_base != 0;
+    const bool dimensionsValid =
+        params.num_reqs > 0 && params.topk > 0 &&
+        params.topk <= INT32_MAX / 2 && params.capacity > 0 &&
+        params.capacity <= INT32_MAX && params.max_token > 0 &&
+        params.max_token <= INT32_MAX && params.max_num_blocks > 0 &&
+        params.block_size > 0 && params.token_size_bytes_k > 0 &&
+        params.token_size_bytes_v > 0;
+    if (!pointersValid || !dimensionsValid || requiredWorkspace == 0 ||
+        params.compact_workspace_bytes < requiredWorkspace) {
+        return false;
+    }
+    if (params.num_reqs > INT64_MAX / params.topk ||
+        params.num_reqs > INT64_MAX / params.capacity ||
+        params.num_reqs > INT64_MAX / params.max_num_blocks) {
+        return false;
+    }
+
+    uint64_t residentTokens = 0;
+    uint64_t residentKBytes = 0;
+    uint64_t residentVBytes = 0;
+    if (!CheckedMultiply(static_cast<uint64_t>(params.num_reqs),
+                         static_cast<uint64_t>(params.capacity),
+                         residentTokens) ||
+        !CheckedMultiply(residentTokens,
+                         static_cast<uint64_t>(params.token_size_bytes_k),
+                         residentKBytes) ||
+        !CheckedMultiply(residentTokens,
+                         static_cast<uint64_t>(params.token_size_bytes_v),
+                         residentVBytes) ||
+        !AddressRangeFits(params.device_k_base, residentKBytes) ||
+        !AddressRangeFits(params.device_v_base, residentVBytes)) {
+        return false;
+    }
+
+    // block_table entries are int32.  Validate the largest address the
+    // Transfer kernel could form even when a malformed table contains
+    // INT32_MAX, so unsigned device-side pointer arithmetic cannot wrap.
+    uint64_t blockBytesK = 0;
+    uint64_t blockBytesV = 0;
+    uint64_t sourceKBytes = 0;
+    uint64_t sourceVBytes = 0;
+    const uint64_t maximumPhysicalBlocks =
+        static_cast<uint64_t>(INT32_MAX) + 1U;
+    if (!CheckedMultiply(static_cast<uint64_t>(params.block_size),
+                         static_cast<uint64_t>(params.token_size_bytes_k),
+                         blockBytesK) ||
+        !CheckedMultiply(static_cast<uint64_t>(params.block_size),
+                         static_cast<uint64_t>(params.token_size_bytes_v),
+                         blockBytesV) ||
+        !CheckedMultiply(maximumPhysicalBlocks, blockBytesK,
+                         sourceKBytes) ||
+        !CheckedMultiply(maximumPhysicalBlocks, blockBytesV,
+                         sourceVBytes)) {
+        return false;
+    }
+    return AddressRangeFits(params.host_k_base, sourceKBytes) &&
+           AddressRangeFits(params.host_v_base, sourceVBytes);
+}
+} // namespace
+
+OFFLOAD_API int32_t offload_sparse_kv_load_runtime(
+    const sparse_kv_load_runtime_params_t *params, uint16_t deviceId)
+{
+    if (params == nullptr || deviceId > UINT8_MAX ||
+        !ValidateSparseKvRuntimeParams(*params)) {
+        OFFLOAD_LOG_ERROR("invalid sparse_kv_load_runtime parameters");
+        return OFFLOAD_ERROR;
+    }
+    return AccOffloadEntryManager::Instance().SparseKvLoadRuntime(
+        *params, static_cast<uint8_t>(deviceId));
 }

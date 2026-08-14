@@ -35,6 +35,22 @@ void OffloadOpsComputeLruResidentAddrs(uint64_t miss_count, uint64_t miss_tokens
                                        int32_t resident_capacity, int64_t num_reqs, int64_t topk,
                                        int64_t max_num_blocks, void *stream);
 
+void OffloadOpsSparseKvPlanRuntime(
+    uint64_t req_ids, uint64_t last_req_ids, uint64_t topk_indices,
+    uint64_t stable_prefix_lens, uint64_t slot_to_token,
+    uint64_t lru_slots, uint64_t current_slots, uint64_t miss_count,
+    uint64_t miss_tokens, uint64_t miss_slots, uint64_t compact_workspace,
+    uint64_t compact_workspace_bytes, int64_t num_reqs, int64_t topk,
+    int64_t capacity, int64_t max_token, void *stream);
+
+void OffloadOpsSparseKvTransferRuntime(
+    uint64_t miss_count, uint64_t miss_tokens, uint64_t miss_slots,
+    uint64_t block_table, uint64_t host_k_base, uint64_t host_v_base,
+    uint64_t device_k_base, uint64_t device_v_base, int64_t num_reqs,
+    int64_t topk, int64_t capacity, int64_t max_num_blocks,
+    int32_t block_size, int32_t token_size_bytes_k,
+    int32_t token_size_bytes_v, void *stream);
+
 #ifdef __cplusplus
 }
 #endif
