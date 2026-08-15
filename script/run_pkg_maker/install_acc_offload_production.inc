@@ -129,6 +129,7 @@ if ! require_device_symbol "${aiv_kernel_library}" OffloadOpsSparseCopy ||
    ! require_device_symbol "${aiv_kernel_library}" OffloadOpsLruCompactFusedV3 ||
    ! require_device_symbol "${aiv_kernel_library}" OffloadOpsComputeLruResidentAddrsMixedParallel ||
    ! require_device_symbol "${aiv_kernel_library}" OffloadOpsSparseKvPlanRuntime ||
+   ! require_device_symbol "${aiv_kernel_library}" OffloadOpsSparseKvPlanFsaRuntime ||
    ! require_device_symbol "${aiv_kernel_library}" OffloadOpsSparseKvTransferRuntime ||
    ! reject_device_symbol "${aiv_kernel_library}" OffloadOpsLruCompact ||
    ! reject_device_symbol "${aiv_kernel_library}" OffloadOpsComputeLruResidentAddrs ||
@@ -232,6 +233,11 @@ sparse_kv_plan_workspace=O(num_reqs*(topk+capacity))
 sparse_kv_plan_max_token_workspace=false
 sparse_kv_plan_hash=gm_open_addressed_cas
 sparse_kv_plan_row_schedule=max_32_blocks_block_stride
+sparse_kv_fsa_plan_runtime=mixed_simt_hash_stable_rows
+sparse_kv_fsa_plan_output=npu_int16_external_plan_v1
+sparse_kv_fsa_plan_mapping=device_deterministic_two_pass
+sparse_kv_fsa_plan_transfer_runtime=false
+sparse_kv_fsa_plan_sync=one_stream_no_host_sync
 sparse_kv_transfer=aiv_datacopypad
 sparse_kv_transfer_blocks=32
 sparse_kv_transfer_descriptor_materialization=false

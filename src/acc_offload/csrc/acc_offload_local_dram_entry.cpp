@@ -256,5 +256,17 @@ int32_t AccOffloadLocalDramEntry::SparseKvLoadRuntime(
     return AccOffloadLaunchApi::AccOffloadSparseKvLoadRuntime(params, devIdx);
 }
 
+int32_t AccOffloadLocalDramEntry::SparseKvPlanFsaRuntime(
+    const sparse_kv_plan_fsa_runtime_params_t &params, uint8_t devIdx)
+{
+    OFFLOAD_LOG_DEBUG("sparse kv FSA plan runtime, logical rows: "
+                      << params.num_logical_rows << ", physical rows: "
+                      << params.physical_row_capacity << ", topk: "
+                      << params.topk << ", capacity: " << params.capacity
+                      << ", devIdx: " << devIdx);
+    return AccOffloadLaunchApi::AccOffloadSparseKvPlanFsaRuntime(
+        params, devIdx);
+}
+
 } // namespace offload
 } // namespace ock

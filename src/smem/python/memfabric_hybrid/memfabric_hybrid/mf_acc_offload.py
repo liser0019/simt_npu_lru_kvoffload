@@ -20,6 +20,11 @@ lru_resident_compact_impl = offload.lru_resident_compact
 compute_lru_resident_addrs_impl = offload.compute_lru_resident_addrs
 get_sparse_kv_plan_workspace_size_impl = offload.get_sparse_kv_plan_workspace_size
 sparse_kv_load_runtime_impl = offload.sparse_kv_load_runtime
+get_sparse_kv_fsa_row_map_workspace_size_impl = \
+    offload.get_sparse_kv_fsa_row_map_workspace_size
+get_sparse_kv_fsa_plan_row_stride_impl = \
+    offload.get_sparse_kv_fsa_plan_row_stride
+sparse_kv_plan_fsa_runtime_impl = offload.sparse_kv_plan_fsa_runtime
 
 
 def empty(sizes, dtype=None, pin_memory=False):
@@ -83,6 +88,17 @@ def compute_lru_resident_addrs(miss_count, miss_tokens, miss_slots, block_table,
 def get_sparse_kv_plan_workspace_size(num_reqs, topk, capacity):
     """Return descriptor-free Plan workspace bytes (independent of max_token)."""
     return get_sparse_kv_plan_workspace_size_impl(num_reqs, topk, capacity)
+
+
+def get_sparse_kv_fsa_row_map_workspace_size(num_logical_rows,
+                                              physical_row_capacity):
+    return get_sparse_kv_fsa_row_map_workspace_size_impl(
+        num_logical_rows, physical_row_capacity)
+
+
+def get_sparse_kv_fsa_plan_row_stride(topk):
+    """Return FSA_NPU_EXTERNAL_PLAN_ABI_V1 row stride in int16 elements."""
+    return get_sparse_kv_fsa_plan_row_stride_impl(topk)
 
 
 def _require_npu_tensor(name, tensor, dtype, shape):
@@ -217,3 +233,103 @@ def sparse_kv_load_runtime(
         device_v_base, num_reqs, topk, capacity, max_token,
         max_num_blocks, block_size, token_size_bytes_k,
         token_size_bytes_v, deviceId.index)
+
+
+def sparse_kv_plan_fsa_runtime(
+        req_ids, last_req_ids, topk_indices, stable_prefix_lens,
+        visible_seq_lens, slot_to_token, lru_slots, current_slots,
+        miss_count, miss_tokens, miss_slots, compact_workspace,
+        row_map_workspace, encoded_plan, current_linear_slots, max_token,
+        deviceId):
+    """Submit the all-NPU FSA Plan-only path on the current NPU stream.
+
+    Persistent LRU tensors are indexed by physical row; TopK and output
+    tensors are indexed by logical row.  ``encoded_plan`` remains on NPU and
+    is consumed directly by fused sparse attention.  This call never launches
+    SparseKvTransferRuntime and never synchronizes.
+    """
+    if req_ids.ndim != 1 or last_req_ids.ndim != 1:
+        raise ValueError("req_ids and last_req_ids must be rank 1")
+    if topk_indices.ndim != 2 or slot_to_token.ndim != 2:
+        raise ValueError("topk_indices and slot_to_token must be rank 2")
+    num_logical_rows, topk = topk_indices.shape
+    physical_row_capacity, capacity = slot_to_token.shape
+    if req_ids.shape[0] != num_logical_rows:
+        raise ValueError("req_ids must cover all logical rows")
+    if last_req_ids.shape[0] != physical_row_capacity:
+        raise ValueError("last_req_ids must cover all physical rows")
+    if physical_row_capacity < num_logical_rows:
+        raise ValueError("physical row capacity must cover logical rows")
+    if topk <= 0 or topk > 2048:
+        raise ValueError("FSA runtime requires 0 < topk <= 2048")
+    if capacity <= 1 or capacity > (1 << 15) - 1:
+        raise ValueError("FSA runtime capacity must be in [2, INT16_MAX]")
+    if physical_row_capacity > (1 << 15) - 1:
+        raise ValueError("physical row capacity exceeds int16 plan ABI")
+    if max_token <= 0 or max_token > (1 << 31) - 1:
+        raise ValueError("max_token must be representable by int32")
+
+    logical = num_logical_rows
+    physical = physical_row_capacity
+    _require_npu_tensor("req_ids", req_ids, torch.int64, (logical,))
+    _require_npu_tensor(
+        "last_req_ids", last_req_ids, torch.int64, (physical,))
+    _require_npu_tensor(
+        "topk_indices", topk_indices, torch.int32, (logical, topk))
+    _require_npu_tensor(
+        "stable_prefix_lens", stable_prefix_lens, torch.int32,
+        (logical,))
+    _require_npu_tensor(
+        "visible_seq_lens", visible_seq_lens, torch.int32, (logical,))
+    _require_npu_tensor(
+        "slot_to_token", slot_to_token, torch.int32,
+        (physical, capacity))
+    _require_npu_tensor(
+        "lru_slots", lru_slots, torch.int32, (physical, capacity))
+    for name, tensor in (("current_slots", current_slots),
+                         ("miss_tokens", miss_tokens),
+                         ("miss_slots", miss_slots)):
+        _require_npu_tensor(name, tensor, torch.int32, (logical, topk))
+    _require_npu_tensor("miss_count", miss_count, torch.int32, (logical,))
+    _require_npu_tensor(
+        "current_linear_slots", current_linear_slots, torch.int32,
+        (logical,))
+
+    stride = get_sparse_kv_fsa_plan_row_stride(topk)
+    _require_npu_tensor(
+        "encoded_plan", encoded_plan, torch.int16, (logical, stride))
+    for name, tensor in (("compact_workspace", compact_workspace),
+                         ("row_map_workspace", row_map_workspace)):
+        if tensor.device.type != "npu" or not tensor.is_contiguous():
+            raise ValueError(f"{name} must be a contiguous NPU tensor")
+    all_tensors = (
+        last_req_ids, topk_indices, stable_prefix_lens, visible_seq_lens,
+        slot_to_token, lru_slots, current_slots, miss_count, miss_tokens,
+        miss_slots, compact_workspace, row_map_workspace, encoded_plan,
+        current_linear_slots)
+    if any(tensor.device != req_ids.device for tensor in all_tensors):
+        raise ValueError("all FSA runtime tensors must share one NPU device")
+    if torch.device(deviceId) != req_ids.device:
+        raise ValueError("deviceId does not match FSA runtime tensor device")
+
+    compact_bytes = compact_workspace.numel() * compact_workspace.element_size()
+    required_compact = get_sparse_kv_plan_workspace_size(
+        logical, topk, capacity)
+    row_map_bytes = row_map_workspace.numel() * row_map_workspace.element_size()
+    required_row_map = get_sparse_kv_fsa_row_map_workspace_size(
+        logical, physical)
+    if compact_bytes < required_compact:
+        raise ValueError("compact_workspace is too small for FSA runtime")
+    if row_map_bytes < required_row_map:
+        raise ValueError("row_map_workspace is too small for FSA runtime")
+
+    return sparse_kv_plan_fsa_runtime_impl(
+        req_ids.data_ptr(), last_req_ids.data_ptr(),
+        topk_indices.data_ptr(), stable_prefix_lens.data_ptr(),
+        visible_seq_lens.data_ptr(), slot_to_token.data_ptr(),
+        lru_slots.data_ptr(), current_slots.data_ptr(),
+        miss_count.data_ptr(), miss_tokens.data_ptr(), miss_slots.data_ptr(),
+        compact_workspace.data_ptr(), compact_bytes,
+        row_map_workspace.data_ptr(), row_map_bytes,
+        encoded_plan.data_ptr(), current_linear_slots.data_ptr(), logical,
+        physical, topk, capacity, max_token, stride, deviceId.index)

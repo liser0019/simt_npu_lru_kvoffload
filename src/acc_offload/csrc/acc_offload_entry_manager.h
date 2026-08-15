@@ -70,6 +70,10 @@ public:
     int32_t SparseKvLoadRuntime(
         const sparse_kv_load_runtime_params_t &params, uint8_t devIdx);
 
+    int32_t SparseKvPlanFsaRuntime(
+        const sparse_kv_plan_fsa_runtime_params_t &params,
+        uint8_t devIdx);
+
     inline bool IsInitialized() const
     {
         return inited_;

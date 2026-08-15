@@ -32,6 +32,24 @@ sparse_kv_load_runtime(...)
 
 旧三算子暂时保留用于 A/B、回滚和真机 oracle，不参与新 API 的正常分发。
 
+## 1.1 FSA Plan-only 分支
+
+融合 attention 模式不运行 TransferRuntime，而在同一 current stream 提交：
+
+```text
+SparseKvMapFsaRowsRuntime
+        ↓
+SparseKvPlanFsaRuntime
+        ↓ NPU int16 external plan
+Fused Copy + Attention
+```
+
+计划始终留在 NPU；没有 `.cpu()`、Host callback 或同步。完整协议见
+`FSA_NPU_EXTERNAL_PLAN_ABI.md`。mapping严格复现 CPU stable-row oracle：先复用
+相同 request id 的 physical row，再使用从未分配的 row，最后使用第一个未占用
+row。FSA 中 TopK/输出属于 logical-row domain，persistent LRU state属于
+physical-row domain；最后一个 resident slot专供 current token。
+
 ## 2. 语义基线
 
 Plan 以 vLLM-Ascend CPU `lru_resident_compact` 为语义真值：

@@ -61,6 +61,10 @@ public:
 
     virtual int32_t SparseKvLoadRuntime(
         const sparse_kv_load_runtime_params_t &params, uint8_t devIdx) = 0;
+
+    virtual int32_t SparseKvPlanFsaRuntime(
+        const sparse_kv_plan_fsa_runtime_params_t &params,
+        uint8_t devIdx) = 0;
 };
 
 } // namespace offload

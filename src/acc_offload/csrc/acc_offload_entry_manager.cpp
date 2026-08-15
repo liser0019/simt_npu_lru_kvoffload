@@ -166,5 +166,15 @@ int32_t AccOffloadEntryManager::SparseKvLoadRuntime(
     return entry_->SparseKvLoadRuntime(params, devIdx);
 }
 
+int32_t AccOffloadEntryManager::SparseKvPlanFsaRuntime(
+    const sparse_kv_plan_fsa_runtime_params_t &params, uint8_t devIdx)
+{
+    if (entry_ == nullptr) {
+        OFFLOAD_LOG_ERROR("entry is null, sparse kv FSA plan runtime failed");
+        return OFFLOAD_ERROR;
+    }
+    return entry_->SparseKvPlanFsaRuntime(params, devIdx);
+}
+
 } // namespace offload
 } // namespace ock

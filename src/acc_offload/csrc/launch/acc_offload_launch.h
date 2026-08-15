@@ -32,6 +32,9 @@ using AccOffloadComputeLruResidentAddrsFunc = void (*)(uint64_t, uint64_t, uint6
 using AccOffloadSparseKvLoadRuntimeFunc = void (*)(
     const sparse_kv_load_runtime_params_t *, uint8_t);
 
+using AccOffloadSparseKvPlanFsaRuntimeFunc = void (*)(
+    const sparse_kv_plan_fsa_runtime_params_t *, uint8_t);
+
 class AccOffloadLaunchApi {
 public:
     static int32_t TryLoadLibrary();
@@ -93,6 +96,16 @@ public:
         return OFFLOAD_OK;
     }
 
+    static inline int32_t AccOffloadSparseKvPlanFsaRuntime(
+        const sparse_kv_plan_fsa_runtime_params_t &params, uint8_t devIdx)
+    {
+        if (pAccOffloadSparseKvPlanFsaRuntime == nullptr) {
+            return OFFLOAD_UNLOAD;
+        }
+        pAccOffloadSparseKvPlanFsaRuntime(&params, devIdx);
+        return OFFLOAD_OK;
+    }
+
 private:
     static std::mutex gMutex;
     static bool gLoaded;
@@ -103,6 +116,8 @@ private:
     static AccOffloadLruCompactFunc pAccOffloadLruCompact;
     static AccOffloadComputeLruResidentAddrsFunc pAccOffloadComputeLruResidentAddrs;
     static AccOffloadSparseKvLoadRuntimeFunc pAccOffloadSparseKvLoadRuntime;
+    static AccOffloadSparseKvPlanFsaRuntimeFunc
+        pAccOffloadSparseKvPlanFsaRuntime;
 };
 
 } // namespace offload

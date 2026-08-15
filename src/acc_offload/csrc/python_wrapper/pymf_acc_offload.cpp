@@ -80,6 +80,12 @@ void DefineAccOffloadApi(py::module_ &m)
           &offload_get_sparse_kv_plan_workspace_size,
           py::arg("num_reqs"), py::arg("topk"), py::arg("capacity"));
 
+    m.def("get_sparse_kv_fsa_row_map_workspace_size",
+          &offload_get_sparse_kv_fsa_row_map_workspace_size,
+          py::arg("num_logical_rows"), py::arg("physical_row_capacity"));
+    m.def("get_sparse_kv_fsa_plan_row_stride",
+          &offload_get_sparse_kv_fsa_plan_row_stride, py::arg("topk"));
+
     m.def("sparse_kv_load_runtime",
           [](uint64_t req_ids, uint64_t last_req_ids,
              uint64_t topk_indices, uint64_t stable_prefix_lens,
@@ -135,6 +141,60 @@ void DefineAccOffloadApi(py::module_ &m)
           py::arg("max_token"), py::arg("max_num_blocks"),
           py::arg("block_size"), py::arg("token_size_bytes_k"),
           py::arg("token_size_bytes_v"), py::arg("deviceId"));
+
+    m.def("sparse_kv_plan_fsa_runtime",
+          [](uint64_t req_ids, uint64_t last_req_ids,
+             uint64_t topk_indices, uint64_t stable_prefix_lens,
+             uint64_t visible_seq_lens, uint64_t slot_to_token,
+             uint64_t lru_slots, uint64_t current_slots,
+             uint64_t miss_count, uint64_t miss_tokens,
+             uint64_t miss_slots, uint64_t compact_workspace,
+             uint64_t compact_workspace_bytes,
+             uint64_t row_map_workspace,
+             uint64_t row_map_workspace_bytes, uint64_t encoded_plan,
+             uint64_t current_linear_slots, int64_t num_logical_rows,
+             int64_t physical_row_capacity, int64_t topk,
+             int64_t capacity, int64_t max_token,
+             int64_t encoded_plan_stride, uint16_t deviceId) {
+              sparse_kv_plan_fsa_runtime_params_t params{};
+              params.req_ids = req_ids;
+              params.last_req_ids = last_req_ids;
+              params.topk_indices = topk_indices;
+              params.stable_prefix_lens = stable_prefix_lens;
+              params.visible_seq_lens = visible_seq_lens;
+              params.slot_to_token = slot_to_token;
+              params.lru_slots = lru_slots;
+              params.current_slots = current_slots;
+              params.miss_count = miss_count;
+              params.miss_tokens = miss_tokens;
+              params.miss_slots = miss_slots;
+              params.compact_workspace = compact_workspace;
+              params.compact_workspace_bytes = compact_workspace_bytes;
+              params.row_map_workspace = row_map_workspace;
+              params.row_map_workspace_bytes = row_map_workspace_bytes;
+              params.encoded_plan = encoded_plan;
+              params.current_linear_slots = current_linear_slots;
+              params.num_logical_rows = num_logical_rows;
+              params.physical_row_capacity = physical_row_capacity;
+              params.topk = topk;
+              params.capacity = capacity;
+              params.max_token = max_token;
+              params.encoded_plan_stride = encoded_plan_stride;
+              return offload_sparse_kv_plan_fsa_runtime(&params, deviceId);
+          }, py::call_guard<py::gil_scoped_release>(),
+          py::arg("req_ids"), py::arg("last_req_ids"),
+          py::arg("topk_indices"), py::arg("stable_prefix_lens"),
+          py::arg("visible_seq_lens"), py::arg("slot_to_token"),
+          py::arg("lru_slots"), py::arg("current_slots"),
+          py::arg("miss_count"), py::arg("miss_tokens"),
+          py::arg("miss_slots"), py::arg("compact_workspace"),
+          py::arg("compact_workspace_bytes"),
+          py::arg("row_map_workspace"),
+          py::arg("row_map_workspace_bytes"), py::arg("encoded_plan"),
+          py::arg("current_linear_slots"), py::arg("num_logical_rows"),
+          py::arg("physical_row_capacity"), py::arg("topk"),
+          py::arg("capacity"), py::arg("max_token"),
+          py::arg("encoded_plan_stride"), py::arg("deviceId"));
 }
 
 PYBIND11_MODULE(_pymf_acc_offload, m)

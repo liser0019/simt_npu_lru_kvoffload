@@ -55,7 +55,10 @@ from _pymf_acc_offload import offload
 from mf_acc_offload import (empty, get_device_address, sparse_copy, lru_resident_compact,
                             compute_lru_resident_addrs,
                             get_sparse_kv_plan_workspace_size,
-                            sparse_kv_load_runtime)
+                            sparse_kv_load_runtime,
+                            get_sparse_kv_fsa_row_map_workspace_size,
+                            get_sparse_kv_fsa_plan_row_stride,
+                            sparse_kv_plan_fsa_runtime)
 
 offload.empty = empty
 offload.get_device_address = get_device_address
@@ -64,6 +67,10 @@ offload.lru_resident_compact = lru_resident_compact
 offload.compute_lru_resident_addrs = compute_lru_resident_addrs
 offload.get_sparse_kv_plan_workspace_size = get_sparse_kv_plan_workspace_size
 offload.sparse_kv_load_runtime = sparse_kv_load_runtime
+offload.get_sparse_kv_fsa_row_map_workspace_size = \
+    get_sparse_kv_fsa_row_map_workspace_size
+offload.get_sparse_kv_fsa_plan_row_stride = get_sparse_kv_fsa_plan_row_stride
+offload.sparse_kv_plan_fsa_runtime = sparse_kv_plan_fsa_runtime
 
 
 __all__ = [

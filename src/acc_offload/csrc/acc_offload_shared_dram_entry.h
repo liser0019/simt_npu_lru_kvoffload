@@ -67,6 +67,10 @@ public:
         const sparse_kv_load_runtime_params_t &params,
         uint8_t devIdx) override;
 
+    int32_t SparseKvPlanFsaRuntime(
+        const sparse_kv_plan_fsa_runtime_params_t &params,
+        uint8_t devIdx) override;
+
 private:
     std::mutex mutex_;
     bool inited_ = false;

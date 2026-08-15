@@ -179,6 +179,11 @@ int32_t offload_compute_lru_resident_addrs(uint64_t miss_count, uint64_t miss_to
 uint64_t offload_get_sparse_kv_plan_workspace_size(
     int64_t num_reqs, int64_t topk, int64_t capacity);
 
+uint64_t offload_get_sparse_kv_fsa_row_map_workspace_size(
+    int64_t num_logical_rows, int64_t physical_row_capacity);
+
+uint64_t offload_get_sparse_kv_fsa_plan_row_stride(int64_t topk);
+
 /**
  * @brief Submit descriptor-free Sparse KV load as Plan + Transfer.
  *
@@ -194,6 +199,17 @@ uint64_t offload_get_sparse_kv_plan_workspace_size(
  */
 int32_t offload_sparse_kv_load_runtime(
     const sparse_kv_load_runtime_params_t *params, uint16_t deviceId);
+
+/**
+ * @brief Submit the all-NPU, plan-only FSA runtime path.
+ *
+ * The call enqueues deterministic stable-row mapping followed by a 1024-lane
+ * SIMT planner on the current stream.  encoded_plan is int16 NPU storage using
+ * FSA_NPU_EXTERNAL_PLAN_ABI_V1.  The call does not launch TransferRuntime and
+ * does not synchronize or copy plan metadata to Host.
+ */
+int32_t offload_sparse_kv_plan_fsa_runtime(
+    const sparse_kv_plan_fsa_runtime_params_t *params, uint16_t deviceId);
 
 #ifdef __cplusplus
 }

@@ -25,6 +25,8 @@ AccOffloadSparseCopyFunc AccOffloadLaunchApi::pAccOffloadSparseCopy = nullptr;
 AccOffloadLruCompactFunc AccOffloadLaunchApi::pAccOffloadLruCompact = nullptr;
 AccOffloadComputeLruResidentAddrsFunc AccOffloadLaunchApi::pAccOffloadComputeLruResidentAddrs = nullptr;
 AccOffloadSparseKvLoadRuntimeFunc AccOffloadLaunchApi::pAccOffloadSparseKvLoadRuntime = nullptr;
+AccOffloadSparseKvPlanFsaRuntimeFunc
+    AccOffloadLaunchApi::pAccOffloadSparseKvPlanFsaRuntime = nullptr;
 
 int32_t AccOffloadLaunchApi::TryLoadLibrary()
 {
@@ -63,6 +65,9 @@ int32_t AccOffloadLaunchApi::TryLoadLibrary()
     DL_LOAD_SYM_OPTIONAL(pAccOffloadSparseKvLoadRuntime,
                          AccOffloadSparseKvLoadRuntimeFunc, libHandle,
                          "AccOffloadSparseKvLoadRuntime");
+    DL_LOAD_SYM_OPTIONAL(pAccOffloadSparseKvPlanFsaRuntime,
+                         AccOffloadSparseKvPlanFsaRuntimeFunc, libHandle,
+                         "AccOffloadSparseKvPlanFsaRuntime");
 
     gLoaded = true;
     return OFFLOAD_OK;
@@ -79,6 +84,7 @@ void AccOffloadLaunchApi::CleanupLibrary()
     pAccOffloadLruCompact = nullptr;
     pAccOffloadComputeLruResidentAddrs = nullptr;
     pAccOffloadSparseKvLoadRuntime = nullptr;
+    pAccOffloadSparseKvPlanFsaRuntime = nullptr;
 
     if (libHandle != nullptr) {
         dlclose(libHandle);

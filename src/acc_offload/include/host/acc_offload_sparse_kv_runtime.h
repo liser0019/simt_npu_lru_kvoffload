@@ -58,6 +58,89 @@ typedef struct sparse_kv_load_runtime_params {
 } sparse_kv_load_runtime_params_t;
 
 /*
+ * Plan-only ABI used by vLLM-Ascend fused sparse attention.  Logical inputs
+ * and outputs are indexed by logical row; last_req_ids/slot_to_token/lru_slots
+ * are persistent physical-row state.  The implementation first builds a
+ * deterministic logical_to_physical map on device, then emits an int16 NPU
+ * external plan consumed directly by the fused attention kernel on the same
+ * stream.  No Host plan bridge and no TransferRuntime launch are involved.
+ */
+typedef struct sparse_kv_plan_fsa_runtime_params {
+    uint64_t req_ids;
+    uint64_t last_req_ids;
+    uint64_t topk_indices;
+    uint64_t stable_prefix_lens;
+    uint64_t visible_seq_lens;
+    uint64_t slot_to_token;
+    uint64_t lru_slots;
+    uint64_t current_slots;
+    uint64_t miss_count;
+    uint64_t miss_tokens;
+    uint64_t miss_slots;
+    uint64_t compact_workspace;
+    uint64_t compact_workspace_bytes;
+    uint64_t row_map_workspace;
+    uint64_t row_map_workspace_bytes;
+    uint64_t encoded_plan;
+    uint64_t current_linear_slots;
+    int64_t num_logical_rows;
+    int64_t physical_row_capacity;
+    int64_t topk;
+    int64_t capacity;
+    int64_t max_token;
+    int64_t encoded_plan_stride;
+} sparse_kv_plan_fsa_runtime_params_t;
+
+enum {
+    SPARSE_KV_FSA_PLAN_ALIGNMENT_INT16 = 16,
+    SPARSE_KV_FSA_PLAN_CONTROL_COUNT_INT16 = 8,
+    SPARSE_KV_FSA_PLAN_CONTROL_STORAGE_INT16 = 16,
+};
+
+#define SPARSE_KV_FSA_PLAN_READY_MARKER ((int16_t)0x5A4D)
+#define SPARSE_KV_FSA_PLAN_EXTERNAL_READY_MARKER ((int16_t)0x5A45)
+#define SPARSE_KV_FSA_PLAN_DIRECT_LAYOUT_MARKER ((int16_t)0x5A44)
+#define SPARSE_KV_FSA_PLAN_PAIRED_COPY_MARKER ((int16_t)0x5A56)
+
+static inline uint64_t sparse_kv_fsa_plan_control_offset_int16(int64_t topk)
+{
+    if (topk <= 0 || topk > INT32_MAX) {
+        return 0;
+    }
+    uint64_t value = (uint64_t)topk;
+    return (value + SPARSE_KV_FSA_PLAN_ALIGNMENT_INT16 - 1U) &
+           ~(uint64_t)(SPARSE_KV_FSA_PLAN_ALIGNMENT_INT16 - 1U);
+}
+
+static inline uint64_t sparse_kv_fsa_plan_row_stride_int16(int64_t topk)
+{
+    uint64_t control_offset =
+        sparse_kv_fsa_plan_control_offset_int16(topk);
+    if (control_offset == 0 ||
+        control_offset > UINT64_MAX -
+            SPARSE_KV_FSA_PLAN_CONTROL_STORAGE_INT16) {
+        return 0;
+    }
+    return control_offset + SPARSE_KV_FSA_PLAN_CONTROL_STORAGE_INT16;
+}
+
+/* logical_to_physical[num_logical_rows] + used[physical_row_capacity]. */
+static inline uint64_t sparse_kv_fsa_row_map_workspace_size_bytes(
+    int64_t num_logical_rows, int64_t physical_row_capacity)
+{
+    if (num_logical_rows <= 0 || physical_row_capacity < num_logical_rows) {
+        return 0;
+    }
+    uint64_t logical = (uint64_t)num_logical_rows;
+    uint64_t physical = (uint64_t)physical_row_capacity;
+    if (logical > UINT64_MAX - physical ||
+        logical + physical > UINT64_MAX / sizeof(int32_t)) {
+        return 0;
+    }
+    return (logical + physical) * sizeof(int32_t);
+}
+
+/*
  * Runtime Plan workspace layout, in int32 elements, for every request row:
  *
  *   hash_keys[hash_capacity]

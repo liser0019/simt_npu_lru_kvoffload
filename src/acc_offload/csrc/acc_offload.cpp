@@ -98,6 +98,18 @@ OFFLOAD_API uint64_t offload_get_sparse_kv_plan_workspace_size(
     return sparse_kv_plan_workspace_size_bytes(num_reqs, topk, capacity);
 }
 
+OFFLOAD_API uint64_t offload_get_sparse_kv_fsa_row_map_workspace_size(
+    int64_t num_logical_rows, int64_t physical_row_capacity)
+{
+    return sparse_kv_fsa_row_map_workspace_size_bytes(
+        num_logical_rows, physical_row_capacity);
+}
+
+OFFLOAD_API uint64_t offload_get_sparse_kv_fsa_plan_row_stride(int64_t topk)
+{
+    return sparse_kv_fsa_plan_row_stride_int16(topk);
+}
+
 namespace {
 bool CheckedMultiply(uint64_t lhs, uint64_t rhs, uint64_t &result)
 {
@@ -191,6 +203,48 @@ bool ValidateSparseKvRuntimeParams(
     return AddressRangeFits(params.host_k_base, sourceKBytes) &&
            AddressRangeFits(params.host_v_base, sourceVBytes);
 }
+
+bool ValidateSparseKvFsaRuntimeParams(
+    const sparse_kv_plan_fsa_runtime_params_t &params)
+{
+    const uint64_t requiredCompact =
+        sparse_kv_plan_workspace_size_bytes(
+            params.num_logical_rows, params.topk, params.capacity);
+    const uint64_t requiredRowMap =
+        sparse_kv_fsa_row_map_workspace_size_bytes(
+            params.num_logical_rows, params.physical_row_capacity);
+    const uint64_t requiredStride =
+        sparse_kv_fsa_plan_row_stride_int16(params.topk);
+    const bool pointersValid =
+        params.req_ids != 0 && params.last_req_ids != 0 &&
+        params.topk_indices != 0 && params.stable_prefix_lens != 0 &&
+        params.visible_seq_lens != 0 && params.slot_to_token != 0 &&
+        params.lru_slots != 0 && params.current_slots != 0 &&
+        params.miss_count != 0 && params.miss_tokens != 0 &&
+        params.miss_slots != 0 && params.compact_workspace != 0 &&
+        params.row_map_workspace != 0 && params.encoded_plan != 0 &&
+        params.current_linear_slots != 0;
+    const bool dimensionsValid =
+        params.num_logical_rows > 0 &&
+        params.physical_row_capacity >= params.num_logical_rows &&
+        params.physical_row_capacity <= INT16_MAX &&
+        params.topk > 0 && params.topk <= 2048 &&
+        params.capacity > 1 && params.capacity <= INT16_MAX &&
+        params.max_token > 0 && params.max_token <= INT32_MAX &&
+        params.encoded_plan_stride >= static_cast<int64_t>(requiredStride);
+    if (!pointersValid || !dimensionsValid || requiredCompact == 0 ||
+        requiredRowMap == 0 || requiredStride == 0 ||
+        params.compact_workspace_bytes < requiredCompact ||
+        params.row_map_workspace_bytes < requiredRowMap) {
+        return false;
+    }
+    if (params.num_logical_rows > INT64_MAX / params.topk ||
+        params.physical_row_capacity > INT64_MAX / params.capacity ||
+        params.num_logical_rows > INT64_MAX / params.encoded_plan_stride) {
+        return false;
+    }
+    return true;
+}
 } // namespace
 
 OFFLOAD_API int32_t offload_sparse_kv_load_runtime(
@@ -202,5 +256,18 @@ OFFLOAD_API int32_t offload_sparse_kv_load_runtime(
         return OFFLOAD_ERROR;
     }
     return AccOffloadEntryManager::Instance().SparseKvLoadRuntime(
+        *params, static_cast<uint8_t>(deviceId));
+}
+
+
+OFFLOAD_API int32_t offload_sparse_kv_plan_fsa_runtime(
+    const sparse_kv_plan_fsa_runtime_params_t *params, uint16_t deviceId)
+{
+    if (params == nullptr || deviceId > UINT8_MAX ||
+        !ValidateSparseKvFsaRuntimeParams(*params)) {
+        OFFLOAD_LOG_ERROR("invalid sparse_kv_plan_fsa_runtime parameters");
+        return OFFLOAD_ERROR;
+    }
+    return AccOffloadEntryManager::Instance().SparseKvPlanFsaRuntime(
         *params, static_cast<uint8_t>(deviceId));
 }

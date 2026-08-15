@@ -274,6 +274,39 @@ void AccOffloadSparseKvLoadRuntime(
     at_npu::native::OpCommand::RunOpApiV2(
         "acc_offload_sparse_kv_load_runtime", callback);
 }
+
+void AccOffloadSparseKvPlanFsaRuntime(
+    const sparse_kv_plan_fsa_runtime_params_t *params, uint8_t devIdx)
+{
+    if (params == nullptr) {
+        return;
+    }
+    sparse_kv_plan_fsa_runtime_params_t value = *params;
+    c10_npu::OptionalNPUGuard npuGuard;
+    npuGuard.set_index(devIdx);
+    auto stream = c10_npu::getCurrentNPUStream(devIdx);
+    void *npuStream = stream.stream(false);
+
+    // Mapping and FSA planning are enqueued on the same current stream.  This
+    // API is intentionally plan-only: it never invokes TransferRuntime and it
+    // never synchronizes or exposes a Host plan bridge.
+    auto callback = [value, npuStream]() -> int {
+        OffloadOpsSparseKvPlanFsaRuntime(
+            value.req_ids, value.last_req_ids, value.topk_indices,
+            value.stable_prefix_lens, value.visible_seq_lens,
+            value.slot_to_token, value.lru_slots, value.current_slots,
+            value.miss_count, value.miss_tokens, value.miss_slots,
+            value.compact_workspace, value.compact_workspace_bytes,
+            value.row_map_workspace, value.row_map_workspace_bytes,
+            value.encoded_plan, value.current_linear_slots,
+            value.num_logical_rows, value.physical_row_capacity, value.topk,
+            value.capacity, value.max_token, value.encoded_plan_stride,
+            npuStream);
+        return 0;
+    };
+    at_npu::native::OpCommand::RunOpApiV2(
+        "acc_offload_sparse_kv_plan_fsa_runtime", callback);
+}
 #endif // MF_ACC_OFFLOAD_PRODUCTION
 
 } // extern "C"
