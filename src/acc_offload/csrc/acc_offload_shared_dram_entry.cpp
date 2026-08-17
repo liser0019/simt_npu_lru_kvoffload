@@ -14,6 +14,7 @@
 #include "smem_store_factory.h"
 #include "acc_offload_launch.h"
 #include "acc_offload_shared_dram_entry.h"
+#include "acc_offload_store_port.h"
 
 namespace ock {
 namespace offload {
@@ -70,10 +71,16 @@ int32_t AccOffloadSharedDramEntry::Initialize(const offload_config_t &config)
             break;
         }
 
-        constexpr int portBase = 8500;
-        int port = portBase + config.deviceId / config.worldSize;
+        uint16_t port = 0U;
+        std::string portError;
+        if (!internal::ResolveAccOffloadStorePort(config.deviceId, config.worldSize, port, portError)) {
+            OFFLOAD_LOG_ERROR("invalid " << internal::ACC_OFFLOAD_PORT_BASE_ENV << ": " << portError);
+            ret = OFFLOAD_ERROR;
+            break;
+        }
         std::string storeUrl = "tcp://127.0.0.1:" + std::to_string(port);
         storeUrl_ = storeUrl;
+        OFFLOAD_LOG_INFO("using config store url: " << storeUrl);
 
         smem_bm_config_t bmCfg {};
         smem_bm_config_init(&bmCfg);
