@@ -39,6 +39,8 @@ include_directories(
         ${PROJECT_ACCLINKS_SRC_BASE}/csrc/security
         ${PROJECT_ACCLINKS_SRC_BASE}/csrc/under_api/openssl
 
+        ${PROJECT_ACC_OFFLOAD_SRC_BASE}/csrc/common
+
         ${ASCEND_CANN_PACKAGE_PATH}/aarch64-linux/include/
 )
 

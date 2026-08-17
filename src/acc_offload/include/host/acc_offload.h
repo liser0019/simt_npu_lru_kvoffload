@@ -40,7 +40,10 @@ typedef struct {
  * @brief Initialize the offload module.
  *
  * This function initializes the hybm big memory entity and loads the
- * offload library for sparse copy operations.
+ * offload library for sparse copy operations. In the SHARED scene, the
+ * config-store TCP port base defaults to 8500 and can be overridden with
+ * MF_ACC_OFFLOAD_PORT_BASE. The existing deviceId/worldSize offset is then
+ * added to the validated base.
  *
  * @param config  [in] Init config, see offload_config_t.
  * @return 0 on success, non-zero error code on failure.
